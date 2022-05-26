@@ -3,7 +3,9 @@
 *.pyc
 *.swp
 *.log
+noROS*.py
 
 # DIRS
 **/__pycache__/
 /media
+**/bruno
