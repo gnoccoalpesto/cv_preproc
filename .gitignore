@@ -1,0 +1,9 @@
+# FILES
+
+*.pyc
+*.swp
+*.log
+
+# DIRS
+**/__pycache__/
+/media

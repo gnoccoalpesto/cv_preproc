@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+	<arg name="unused" default="false" doc="template"/>
+	
+	<node
+		pkg="cv_preproc"
+		type="image_filter.py"
+		name="image_filter"
+		output="screen"
+	/>
+
+</launch>

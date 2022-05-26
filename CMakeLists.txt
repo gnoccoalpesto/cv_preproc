@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(cv_proproc)
+project(cv_preproc)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)
@@ -8,7 +8,7 @@ project(cv_proproc)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  #cv2
+ # cv2
   #matplotlib
   #numpy
   #roscpp
@@ -112,7 +112,7 @@ add_library(time STATIC IMPORTED)
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES ercam1
-#  CATKIN_DEPENDS cv2 matplotlib numpy roscpp rospy sensor_msgs std_msgs time
+ # CATKIN_DEPENDS cv2 matplotlib numpy rospy roscpp sensor_msgs std_msgs time
 #  DEPENDS system_lib
 )
 
@@ -166,10 +166,13 @@ include_directories(
 
 ## Mark executable scripts (Python etc.) for installation
 ## in contrast to setup.py, you can choose the destination
-# catkin_install_python(PROGRAMS
- # scripts/roscam1.py
-  #DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
- #)
+catkin_install_python(
+ PROGRAMS
+  scripts/image_filter.py
+  scripts/camera.py
+  scripts/image_filter_BACKUP.py
+ DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
+)
 
 ## Mark executables for installation
 ## See http://docs.ros.org/melodic/api/catkin/html/howto/format1/building_executables.html
@@ -193,11 +196,11 @@ include_directories(
 # )
 
 ## Mark other files for installation (e.g. launch and bag files, etc.)
-# install(FILES
-#   # myfile1
-#   # myfile2
-#   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-# )
+install(
+ DIRECTORY
+   launch
+ DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+ )
 
 #############
 ## Testing ##
