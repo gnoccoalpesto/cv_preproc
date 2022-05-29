@@ -101,12 +101,12 @@ from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 from scipy.cluster.vq import kmeans2
-# encapsulates filter definition, histograms analysis tools
-from lib_filters import bilateralFilter, denoisingFilter
+# histograms analysis tools definitions
 from lib_histograms import computeHistogram, drawHistogram
 #TODO: fix import
 #TODO? ALSO import class methods?
 import time
+from glob import glob
 
 
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
@@ -114,11 +114,16 @@ import time
 class ImagePreprocNode:
     """    """
     def __init__(self):
-        camera_dict = { 'NavCam': "/camera/image_raw",
-                        'HazCam': "zed2/left_raw/image_raw_color"}
-        self.camera_topic = camera_dict['HazCam']
+        camera_dict = { 'NavCam':   "/camera/image_raw",
+                        'HazCam':   "zed2/left_raw/image_raw_color",
+                        'nsyHazCam':"/camera/image_raw/noisy",
+                        'prprocHazCam':"/camera/image_raw/preproc"}
+
+        self.input_topic = rospy.get_param(
+            '/image_preproc/preproc_camera_topic',camera_dict['prprocHazCam'])
+
         self.filtered_topic = "/camera/image_raw/filtered"
-        print('listened topic: ' + self.camera_topic)
+        print('listened topic: ' + self.input_topic)
         print('published topic: ' + self.filtered_topic)
 
         self.cvbridge = CvBridge()
@@ -133,43 +138,48 @@ class ImagePreprocNode:
         self.imu_topic=imu_dict['imu']
         self.imu_msg = []
 
-        self.sim_img = np.ndarray
+        self.preproc_img = np.ndarray
         self.in_dtype = None
         self.camera_resolution = tuple
         self.camera_channels=int
         self.current_resolution= tuple
         self.print_once_resolution=True
 
-        self.noisy_img = np.ndarray
-        self.dnoise_img = np.ndarray
+        self.filtered_img=np.ndarray
 
         self.sky_to_groud=float
         self.sky_image=np.ndarray
         self.ground_image=np.ndarray
+        self.sky_mask=np.ndarray
 
-        self.MORPH_OPS='c' #odh hdc hdo
+        self.MORPH_OPS='0'#'ce'
 
-        self.res_ada= np.ndarray
         self.res_sample= np.ndarray
-        self.res_otsu= np.ndarray
         self.res_range= np.ndarray
-        self.res_bal= np.ndarray
-        self.ada_mask= np.ndarray
         self.sample_mask= np.ndarray
-        self.otsu_mask= np.ndarray
         self.range_mask= np.ndarray
-        self.bal_mask= np.ndarray
         self.select_new_sample=False
         self.samples=[]
+        self.averaging_samples=[]
         self.sample_mask=None
+        self.sample_source='../media/samples/'
+        self.addedAllSample=False
+
+        self.selected_filter='s'
+        # available filters:    s   sample
+        #                       r   range
+        self.toggle_sample=True
+        self.toggle_range=False
+        self.toggle_morph=True
+
         #   #   #   #   #   #   #   #   #
         self.initFilter()
         # start I/O operations; Subscribe: each time a message comes, Publish: upon request
         self.filteredPublisher = rospy.Publisher(self.filtered_topic, Image, queue_size=1)
-        self.cameraListener = rospy.Subscriber(self.camera_topic, Image, self.preprocCallback)
+        self.preprocListener = rospy.Subscriber(self.input_topic, Image, self.inputCallback)
         #TODO? could a timer solve the callback freeze when selecting sample issue?
         # TODO ALSO could to set a greater frequency to decrease overhead
-        # self.preprocTimer=rospy.Timer(rospy.Duration(0.01),self.preprocCallback)
+        self.filterTimer=rospy.Timer(rospy.Duration(0.005),self.filterCallback)
 
         self.morphOpsListener=rospy.Subscriber(self.morph_ops_source,String,self.morphOpsCallback)
 
@@ -184,6 +194,9 @@ class ImagePreprocNode:
         self.iter_stamp=0
         self.iter_counter=0
         self.ave_time=0
+        self.ave_sample_t=0
+        self.ave_range_t=0
+
 
         #   KCLUSTERS     #   #   #   #   #   #
         self.n_colors = 12
@@ -196,7 +209,7 @@ class ImagePreprocNode:
     #   INITIALIZATION, I/O CALLBACKS, STATISTICS   #   #   #   #   #   #
     def initFilter(self):
         print('initializing...')
-        msg = rospy.wait_for_message(self.camera_topic, Image)
+        msg = rospy.wait_for_message(self.input_topic, Image)
         image = self.cvbridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
         # original dtype is uint8, display also accepts float32 (NOTE: result uint8==float32/255)
         self.in_dtype = image.dtype
@@ -227,6 +240,18 @@ class ImagePreprocNode:
             self.select_new_sample=True
 
 
+    def removeSampleCallback(self,index_to_remove_msg):
+        """
+        removes a sample by its index from the sampleFilter array
+        :param index_to_remove_msg: integer, val<0 counts from the end
+        TODO? does this work with empty msg? technically .pop()==.pop(-1)
+        """
+        try:
+            self.samples.pop(index_to_remove_msg)
+        except:
+            print('could not remove that element')
+
+
     #--UNUSED--
     def imuCallback(self,raw_imu):
     # TODO: refine sky recognition using cross imu data:
@@ -238,204 +263,84 @@ class ImagePreprocNode:
         self.imu_msg=raw_imu
 
 
-    def updateStatistics(self,time_setpoint):
+    def inputCallback(self,img_msg):
         """
-        running average for cycle time
-        pause required for misleading results when awiting for user input
+        'Real Time' (threaded) ascquisition of preprocessed input image
         """
-        self.iter_stamp+=1
-        if not self.pause_stats:
-            self.ave_time = (self.ave_time * self.iter_counter + time.time() - time_setpoint) / (self.iter_counter + 1)
-            print('avg. cycle [ms]: {}'.format(np.round(self.ave_time * 1000, 6)), end='\r')
-            self.iter_counter += 1
-        else:
-            self.pause_stats=False
-
-#    ##################################################################################
-###    ##################################################################################
-######    ##################################################################################
-    # MAIN LOOP : every time a msg on self.camera_topic received
-    def preprocCallback(self, raw_img):
         try:
-            # SIMULATED INPUT -- 1 ms ------------------------------------------------------------------
-            self.sim_img = self.cvbridge.imgmsg_to_cv2(raw_img, desired_encoding='passthrough')
-            self.downsampleCamera(2,do_blur=True)
+            self.preproc_img = self.cvbridge.imgmsg_to_cv2(img_msg, desired_encoding='passthrough')
 
-            # NOISE ADDITION (GAUSSIAN+UNIFORM) -- + 10 ms ---------------------------
-            self.noiseSimualtion(noise_type='ug',intensity_coeff=1)
-
-            # DENOISING -- + 4 ms -----------------------------------------------------------------------
-            self.noiseRemotion(do_denoise=True)
-
-            # IMAGE ANALYSIS -- + 5 ms ------------------------------------------------------------------
-            # self.cameraAnalysis(show_hist=True)
-
-            # self.splitCamera(self.sky_to_groud,hud=False)
-
-            # self.cameraClustering()
-
-            # BACKGROUND FILTERING -- +10 ms ------------------------------------------------------------------------
-            this_time = time.time()
-            morph_ops=self.MORPH_OPS
-            show_result=True
-            win_prefix=''
-            # self.otsuFilter(show_result=show_result, morph_ops = morph_ops, winname_prefix = win_prefix)
-            # self.balancedFilter(show_result=show_result, morph_ops = morph_ops, winname_prefix = win_prefix)
-            # self.rangeFilter(show_result=show_result, morph_ops = morph_ops, winname_prefix = win_prefix)
-            self.sampleFilter(show_result=show_result, morph_ops = morph_ops, winname_prefix = win_prefix)
-
-            # OUTPUT ------------------------------------------------------------------------------------
-            #TODO: superimpose time matermark on output to understand when output stopped
-
-            # SIMULATED
-            # self.showChannels(noisy='s',channels='f')
-            # self.showHistograms(noisy='s')
-            # NOISY
-            # self.showChannels(channels='f',noisy='n',winname_prefix='U+G')
-            # self.showHistograms(noisy='n')
-            # DENOISED
-            # self.showHistograms(noisy='d',channels='h')
-            # self.showChannels(channels='f')
-            # self.showChannels(channels='hsv',h_shift=30)
-
-            out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
-            self.filteredPublisher.publish(out_msg)
-
-            ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##
-            k = cv2.waitKey(1) & 0xFF
-            if k == 27: exit(0)
-
-            self.updateStatistics(this_time)
         except CvBridgeError:
             # TODO: self.bridgerror
             print("cv bridge error")
 
+    #    ##################################################################################
+###    ##################################################################################
+######    ##################################################################################
+
+    # MAIN LOOP : every time a msg on self.input_topic received
+    # TODO: removing input from this HEAVY COMPUTATIONAL LOAD CALLBACK could make
+    #   routines getting stuck: sample average,...
+    # TODO ALSO: could separate all actions in different filters to exploit "multi threading"
+    def filterCallback(self, _):
+        that_time = time.time()
+
+        # IMAGE ANALYSIS --------------------------------------------------------------------
+        # self.cameraAnalysis(show_hist=True)
+
+        # self.splitCamera(self.sky_to_groud,hud=False)
+
+        # self.cameraClustering()
+
+        # BACKGROUND FILTERING -------------------------------------------------------------------------
+        morph_ops = self.MORPH_OPS# if self.toggle_morph else ''
+
+        show_result=True
+        win_prefix=''
+
+        self.preMask()
+        if self.toggle_sample:
+            self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
+            out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
+            self.filteredPublisher.publish(out_msg)
+        elif self.toggle_range:
+            self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
+            out_msg = self.cvbridge.cv2_to_imgmsg(self.res_range)
+            self.filteredPublisher.publish(out_msg)
+
+        # this_time = time.time()
+        # self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
+        # sample_time = time.time() - this_time
+        # this_time = time.time()
+        # self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
+        # range_time = time.time() - this_time
+
+        # OUTPUT ------------------------------------------------------------------------------------
+        #TODO: superimpose time matermark on output to understand when output stopped
+
+        # self.showHistograms(noisy='d',channels='h')
+        # self.showChannels(channels='f')
+        # self.showChannels(channels='hsv',h_shift=30)
+
+        out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
+        self.filteredPublisher.publish(out_msg)
+
+        ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##
+        k = cv2.waitKey(1) & 0xFF
+        if k == 27:#Esc
+            rospy.signal_shutdown('Esc key pressed')
+        elif k!=255:#NO KEY PRESSED
+            # print(k)
+            self.keyAction(k)
+        self.updateStatistics(that_time)
+        # self.dualStatistics(sample_time,range_time)
+
 ######    ##################################################################################
 ###    ##################################################################################
 #    ##################################################################################
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-    # INPUT TOOLS   #   #   #   #   #   #
-    def downsampleCamera(self,downsize_coeff,do_blur=True):
-        """
-        resizes (reduces) input camera image stream self.sim_img by 1/downsize_coeff
-        :param downsize_coeff>1
-        :param do_blur: if True, in addition it blurs the image accordingly,
-            creating an higher level in the image pyramid
-
-        self.camera_resolution: original, self.current_resolution: resized
-        """
-        new_size=self.camera_resolution[1]//downsize_coeff,self.camera_resolution[0]//downsize_coeff
-        if do_blur and downsize_coeff!=1:
-            self.sim_img = cv2.pyrDown(self.sim_img, dstsize=new_size)
-        else:
-            self.sim_img=cv2.resize(self.sim_img,new_size,interpolation=cv2.INTER_AREA)
-        self.current_resolution=new_size[1],new_size[0]
-        if self.print_once_resolution:
-            self.print_once_resolution=False
-            print("reduced resolution: {}".format(self.current_resolution))
-
-
-    def noiseSimualtion(self, noise_type=None,intensity_coeff=1):
-        """
-        simulate and adds to the input stream noise
-        :param noise_type: 'uniform','u'; 'gaussian','g'; impulsive 'snp','i'
-            NOTE: permitted multiple at once: e.g. noise_type='ug' adds both
-        :param intensity_coeff: multiplicative coeff for noise intensity
-        :return:
-        """
-        #TODO: simple sum(+) 3x faster but "saturation"
-
-        #TODO: adding directly to outgoing signal doesn't seem to work
-        image=self.sim_img.copy()
-        channels = image.shape[2]
-        noisy_img = np.zeros_like(image, dtype=np.uint8)
-        if 'uniform' in noise_type or 'u' in noise_type:
-            Min = np.zeros([1, channels])
-            intensity=intensity_coeff*2.5
-            Max=intensity*np.ones([1,channels])
-            cv2.randu(noisy_img, Min, Max)
-            image = cv2.add(image, noisy_img)
-        if 'gaussian' in noise_type or 'g' in noise_type:
-            intensity=intensity_coeff*2.5
-            mean=intensity*np.ones([1,channels])
-            stddev=intensity*np.ones([1,channels])
-            cv2.randn(noisy_img, mean, stddev)
-            image = cv2.add(image, noisy_img)
-        if 'snp' in noise_type or 'i' in noise_type:
-            Min = np.zeros([1, channels])
-            Max = 255 * np.ones([1, channels])
-            cv2.randu(noisy_img, Min, Max)
-            noise_thresh = 250
-            _, noise_img = cv2.threshold(noisy_img, noise_thresh, Max[0][0], cv2.THRESH_BINARY)
-            image = cv2.add(image, noisy_img)
-        #TODO
-        #     row, col, ch = image.shape
-        #     s_vs_p = 0.5
-        #     amount = 0.004
-        #     out = np.copy(image)
-        #     # Salt mode
-        #     num_salt = np.ceil(amount * image.size * s_vs_p)
-        #     coords = [np.random.randint(0, i - 1, int(num_salt))
-        #               for i in image.shape]
-        #     out[coords] = 1
-        #     # Pepper mode
-        #     num_pepper = np.ceil(amount * image.size * (1. - s_vs_p))
-        #     coords = [np.random.randint(0, i - 1, int(num_pepper))
-        #               for i in image.shape]
-        #     out[coords] = 0
-        # if'speckle'in noise_type or's'in noise_type:
-        #     row, col, ch = image.shape
-        #     gauss = np.random.randn(row, col, ch)
-        #     gauss = gauss.reshape(row, col, ch)
-        # image = cv2.add(image, noisy_img)
-        # if'poisson'in noise_type or'p'in noise_type:
-        #     vals = len(np.unique(image))
-        #     vals = 2 ** np.ceil(np.log2(vals))
-        #     noisy_img = np.random.poisson(image * vals) / float(vals)
-        #     image = cv2.add(image, noisy_img)
-        self.noisy_img=image
-
-
-    #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-    #   IMAGE PREPROCESSING #   #   #   #   #   #
-    def noiseRemotion(self,do_denoise=True):
-        """
-        :param do_denoise: if False, noisy image is copied into denoised
-
-        AVAILABLE FILTERS:
-            - denoising filter: good performance
-            - bilateral: preserves visual markers, other objects of interest
-            - gaussian: kinda slow, performance could be better but RT application hence k->sigma shall be small
-            - median: could be usefull to preserve color, high smoothing, SHARPER HIST (=~ original)
-                ALSO it is possible that it must be applied indep. on each channel
-
-        TESTED COMBINATIONS:
-            k_size=5 since online use
-            0)denoise_image=self.denoisingFilter(self.bilateralFilter(image,k_size=5,sigma_color=35,sigma_space=35))
-            1)denoise_image=self.bilateralFilter(self.denoisingFilter(image),k_size=5,sigma_color=35,sigma_space=35)
-            2)denoise_image=self.medianFilter(self.denoisingFilter(image))
-            3)denoise_image=self.medianFilter(self.denoisingFilter(self.bilateralFilter(image,k_size=5,sigma_color=35,sigma_space=35)))
-            4)denoise_image=self.medianFilter(self.denoisingFilter(self.denoisingFilter(image)))
-        NOTE: filters in lib_filters.py
-
-        SELECTED: 1; good mix between speed, thin H hist, edges' sharpness           self.dnoise_img: denoised image
-
-
-        TODO? different color spaces effect on filtering?
-
-        TODO? could channel denoising & merging faster than full denoising?
-          does opencv manage this autonomously (like w/ big kernels)
-        """
-        if do_denoise:
-            image = self.noisy_img.copy()
-            denoise_image=bilateralFilter(denoisingFilter(image),k_size=5,sigma_color=45,sigma_space=45)
-            self.dnoise_img = denoise_image.astype(self.in_dtype)
-        else:
-            self.dnoise_img = self.noisy_img.copy().astype(self.in_dtype)
-        #TODO? faster conversion? np.TYPE(IMG), IMG.astype('TYPE), .ASTYPE(np.TYPE)
-
-
+    #   IMAGE PREPROCESSING
     def cameraClustering(self,cl_method='sy',show_result=False):
         """
         clustering routine using k-means
@@ -448,7 +353,7 @@ class ImagePreprocNode:
 
         TODO initialize this offline to find dominant colors of image
         """
-        image = self.dnoise_img
+        image = self.preproc_img
         current_resolution=self.current_resolution
         image = image.reshape((-1, 3)).astype('float32')
         if'c'in cl_method:
@@ -513,7 +418,7 @@ class ImagePreprocNode:
          local maxima could be usefull for rocks, glacier, mud volcanoes...
         """
         roll_amount=30
-        image = self.dnoise_img
+        image = self.preproc_img
         hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
         # range_normalization helps with (de)noisy pxs count
         _,_,histogram= computeHistogram(hsv_image,'h',range_normalize=True)
@@ -555,9 +460,9 @@ class ImagePreprocNode:
             division height-wise (full width) depending of ratio for speeding up
             the img. proc. pipeline
         :param ratio: ratio between the 2 parts
-        :param hud: adds enclosing rectangles of sky, ground regions to self.dnoise_img
+        :param hud: adds enclosing rectangles of sky, ground regions to self.preproc_img
         """
-        image=self.dnoise_img
+        image=self.preproc_img
         self.sky_image=image[:max(1,int(self.current_resolution[0]*ratio)),:]
         self.ground_image=image[int(self.current_resolution[0]*ratio)+1:,:]
         if hud:
@@ -567,13 +472,27 @@ class ImagePreprocNode:
 
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-    #   BACKGROUND-FOREGROUND SEPARTION #   #   #   #   #   #
-    # def preMask(self):
-    #TODO
-    # since some elements are known in color, it could be possible to use a mask
-    # before thresholding to "save" some regions and avoid elimination; this could
-    # help, simplyfing (ground) mask refinement and prevent loss of areas of interest
-    # i.e. sky (100% removed), visual markers (0% removed)
+    #   BACKGROUND-FOREGROUND SEPARTION
+    def preMask(self):
+        """
+        since some regions are known (more or less), a mask can be developed
+        before other methods (using cv2.inRange() tool) to save some computation
+
+        Note that this extends the idea of self.rangeFilter() (described below)
+
+        TODO: implement a mask for objects CERTAINTLY NOT TO REMOVE FROM IMAGE
+            (i.e. markers, probes, rocks,...)
+
+        TODO? mask refinement could be done here too( hence twice)?
+
+        TODO: causes some "holes" in white objects
+        """
+        image = self.preproc_img
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        #sky filtering
+        blue_min=(110, 0, 0)
+        blue_max=(130, 255, 255)
+        self.sky_mask=cv2.inRange(hsv_image,blue_min,blue_max)
 
 
     def otsuFilter(self,show_result=False,winname_prefix='',morph_ops=' '):
@@ -583,54 +502,53 @@ class ImagePreprocNode:
         :param show_result: displays image of result
         PROS:   fast (13ms w/ half-sampled image)
                 good results on binodal hist (clear separation sky-ground)
-
         CONS:   "artifacts" when unimodal hist (i.e. only ground)
                  removes optical markers
                  does not remove ice
                  not tune-able
-
         TODO: fast computation using between-class var approach
         """
-        image = self.dnoise_img
+        image = self.preproc_img
         # manage h circularity
         h_shift=27
         hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
         h_image=hsv_image[...,0]
         h_image=(h_image+h_shift)%180
         _, otsu_mask=cv2.threshold(h_image,0,255,cv2.THRESH_OTSU+cv2.THRESH_BINARY_INV)
+        otsu_mask=cv2.bitwise_or(otsu_mask,self.sky_mask)
+        otsu_mask = cv2.bitwise_not(otsu_mask)
         otsu_mask = self.maskRefinement(otsu_mask,morph_ops=morph_ops)
-        self.otsu_mask = cv2.bitwise_not(otsu_mask)
-        self.res_otsu=cv2.bitwise_and(image,image,mask=self.otsu_mask)
+        res_otsu=cv2.bitwise_and(image,image,mask=otsu_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ground otsu',cv2.cvtColor(self.res_otsu,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' ground otsu',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
 
 
     # -- UNUSED --
     def adaptiveFilter(self,k_size=5,show_result=False,winname_prefix=''):
         """
-        PROS:   ???
+        PROS:   none?
         CONS:   !!!
         """
-        image = self.dnoise_img
+        image = self.preproc_img
         h_shift = 27
         hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
         h_image = hsv_image[..., 0]
         h_image = (h_image + h_shift) % 180
         ada_mask = cv2.adaptiveThreshold(h_image,255,cv2.ADAPTIVE_THRESH_MEAN_C,
                                          cv2.THRESH_BINARY_INV, k_size, 2)
-        self.ada_mask = cv2.bitwise_not(ada_mask)
-        self.res_ada = cv2.bitwise_and(image, image, mask=self.ada_mask)
+        ada_mask=cv2.bitwise_or(ada_mask,self.sky_mask)
+        ada_mask = cv2.bitwise_not(ada_mask)
+        res_ada = cv2.bitwise_and(image, image, mask=ada_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ground ada', cv2.cvtColor(self.res_ada, cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' ground ada', cv2.cvtColor(res_ada, cv2.COLOR_RGB2BGR))
 
 
     def balancedFilter(self,show_result=False,winname_prefix='',morph_ops=' '):
         """
-        "iterative weight balancement" algorithm for finding histogram's barycenter
+        'iterative weight balancement' algorithm for finding histogram's barycenter
             to use it as a threshold
         PROS:   works great even in absence of sky
                 removes ice better
-
         CONS:   a bit slower (17 ms)
                 strange flickering (mask is totally ON/OFF) when observing one end
                     of the crater (far from ice, near fold aside the passage)
@@ -638,7 +556,7 @@ class ImagePreprocNode:
                         [even otsu goes nuts in that circumstance]
                 removes visual targets
         """
-        image = self.dnoise_img
+        image = self.preproc_img
         h_shift=27
         hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
         h_image=hsv_image[...,0]
@@ -646,11 +564,14 @@ class ImagePreprocNode:
         h_hist=np.histogram(h_image,180,[0,180])
         bal_tresh=self.balanced_hist_thresholding(h_hist)
         _, bal_mask=cv2.threshold(h_image,bal_tresh,255,cv2.THRESH_BINARY_INV)
+        bal_mask = cv2.bitwise_or(bal_mask, self.sky_mask)
+        bal_mask = cv2.bitwise_not(bal_mask)
         bal_mask = self.maskRefinement(bal_mask,morph_ops=morph_ops)
-        self.bal_mask=cv2.bitwise_not(bal_mask)
-        self.res_bal=cv2.bitwise_and(image,image,mask=self.bal_mask)
+        res_bal=cv2.bitwise_and(image,image,mask=bal_mask)
+
         if show_result:
             cv2.imshow(winname_prefix+' ground bal',cv2.cvtColor(self.res_bal,cv2.COLOR_RGB2BGR))
+
     @staticmethod
     def balanced_hist_thresholding(hist):
         left_end_pt = np.min(np.where(hist[0] > 0))
@@ -679,22 +600,21 @@ class ImagePreprocNode:
 
     def rangeFilter(self,do_shift=False,show_result=False,winname_prefix='',morph_ops=' '):
         """
+        simple channel range threshold; masked when all conditions sussist
+
         :param do_shift: toggles shifting toward right (higher values) of H channel
                         hence avoiding circularity issues
         :param show_result: displays image of result
         :param morph_ops: ordered string of morphological operations to perform
         :param winname_prefix: prefix for window name (when showing result)
-        simple channel range threshold; masked when all conditions sussist
 
         PROS:   does not remove visual targets
                 precise, in the sense that only targets ground (reddish areas)
                 no "glitching" when histogram not bimodal
-
         CONS:   hardcoded
 
         ALTERNATIVE APPROACH: USE LAB COLORSPACE
         + device independent (L might be a little)
-
         {YET: +hs mostrly condition indep
          BUT   -h cyclic, hence difference indoor/outdoor light possible) }
           L: dark(0)/bright(100)              ^+B/
@@ -702,17 +622,22 @@ class ImagePreprocNode:
           A: green(<0)/red(>0)        -A<----------->+A
           B: blue(<0)/yellow(>0)              |-B
         NOTE THAT HUE= ANGLE(from +A axis, ccw)
-        """
-        #TODO? could use sky_to_ground ratio to toggle which method to use for thresholding?
+        TODO? could use sky_to_ground ratio to toggle which method to use for thresholding?
 
-        #TODO: avoid red circularity by inverting the image
-        #   and removing cyan {hsv:(90 - 10, 70, 50), (100, 255, 255)}
-        image = self.dnoise_img
+        TODO: avoid red circularity by inverting the image
+          and removing cyan {hsv:(90 - 10, 70, 50), (100, 255, 255)}
+
+        TODO: apply self.sky_mask before to compute here to reduce computation amount
+            apply contextually an "ignore black pxs mask" to ignore already masked regions
+            (and also visual markers)
+        """
+        # image = self.nosky_img
+        image = self.preproc_img
         hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
         if do_shift:
             red_max = (30, 255, 255)
             red_min = (0, 35, 50)
-            range_mask = cv2.inRange(hsv_image, red_min, red_max)
+            red_mask = cv2.inRange(hsv_image, red_min, red_max)
             winname_prefix=winname_prefix+' shifted'
         else:
             red_max = (10, 255, 255)
@@ -721,74 +646,14 @@ class ImagePreprocNode:
             red_min = (165, 30, 50)
             red_mask_min = cv2.inRange(hsv_image, red_zeromax, red_max)
             red_mask_max = cv2.inRange(hsv_image, red_min, red_zeromin)
-            range_mask = cv2.bitwise_or(red_mask_min, red_mask_max)
+            red_mask = cv2.bitwise_or(red_mask_min, red_mask_max)
             winname_prefix=winname_prefix+' '
-        range_mask = self.maskRefinement(range_mask,morph_ops=morph_ops)
-        self.range_mask=cv2.bitwise_not(range_mask)
+        range_mask = cv2.bitwise_or(red_mask, self.sky_mask)
+        range_mask = cv2.bitwise_not(range_mask)
+        self.range_mask = self.maskRefinement(range_mask,morph_ops=morph_ops)
         self.res_range = cv2.bitwise_and(image, image, mask=self.range_mask)
         if show_result:
             cv2.imshow(winname_prefix+' ground range',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
-
-
-    def addNewSample(self):
-        """
-        manual sample selection from image from a static window
-        test of correlation w/ while image not activated (prevents remotion of PARTICULARS)
-
-        TODO: since selection occours over a single frame of video, it's prone to noise:
-         should select a TEMPORAL MEAN of that region (but rover must stand still)
-
-        TODO: no tested methid permitted to have the program working while selecting:
-         not putting this in a different callback (freezes), spawning another listener,...
-         ALSO: multithreading does not really exist thanks to GIL
-         BUT: nogil
-
-        TODO: multiple ROIs selection at once with cv2.selectROIs()
-
-        TODO: comparison between histaograms of samples and whole image/dominant colors
-            will be required for automatic selection of samples
-         histogram comparison methods and relative tested data (static setup)
-         hist_compare_dict = {
-            "Correlation", (cv2.HISTCMP_CORREL, 0.2),  # or  0.4
-            "Chi-Squared", (cv2.HISTCMP_CHISQR, 10000000),
-            "Intersection", (cv2.HISTCMP_INTERSECT, 0.45),
-            "Hellinger", (cv2.HISTCMP_BHATTACHARYYA, 0),
-            "Kullback-Leibler", (cv2.HISTCMP_KL_DIV, 500)}
-         _, compare_method, COMPARE_THRES = hist_compare_dict["Correlation"]
-         image=cv2.cvtColor(img,cv2.COLOR_RGB2HSV)
-         _,_,image_hist=computeHistogram(image,'hs',range_normalize=True)
-         image_hist=image_hist.astype('float32')
-         if cv2.compareHist(image_hist,sample_hist,hist_compare_method)>hist_compare_thres or bypass_comp:
-        """
-        winname="MOUSE+ENTER for selection,ESC to exit"
-        img=self.dnoise_img
-        rois=cv2.selectROIs(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
-        # roi_x0,roi_y0,roi_x,roi_y=cv2.selectROI('SELECT NEW SAMPLE',cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
-        cv2.destroyWindow(winname)
-        for (roi_x0,roi_y0,roi_x,roi_y) in rois:
-            try:
-                new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
-                new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
-                _,_,sample_hist=computeHistogram(new_sample,'hs',range_normalize=True)
-                sample_hist=sample_hist.astype('float32')
-                self.samples.append(sample_hist)
-                filename='../media/samples/sample_{}.jpg'.format(str(time.time()))
-                cv2.imwrite(filename,cv2.cvtColor(new_sampl,cv2.COLOR_RGB2BGR))
-            except Exception as exc:
-                print('sample aquisition aborted '+str(exc)[13])
-        print("number of current samples: {}".format(len(self.samples)))
-
-
-    def removeSampleCallback(self,index_to_remove_msg):
-        """
-        removes a sample by its index from the sampleFilter array
-        :param index_to_remove_msg: integer, val<0 counts from the end
-        TODO? does this work with empty msg? technically .pop()==.pop(-1)
-        """
-        try:
-            self.samples.pop(index_to_remove_msg)
-        except:
-            print('could not remove that element')
 
 
     def sampleFilter(self,show_result=False, winname_prefix='', morph_ops=' '):
@@ -834,7 +699,6 @@ class ImagePreprocNode:
             (and it would have been counterintuitive)
 
         TODO: possibly best refinement would be a CLOSING w/ a SMALL kernel
-
         TODO ALSO: better refinement before or after the union of indivudual masks?
 
         TODO: init the mask outside (e.g. when computing self.current_resolution)
@@ -843,8 +707,13 @@ class ImagePreprocNode:
         TODO: cv2.calcBackProjection accepts an array of images: MUST BE SAME SIZE;
             could have a constant saple size using onClick events
             ELSE: could interpolate the images
+
+        TODO: apply self.sky_mask before to compute here to reduce computation amount
+            apply contextually an "ignore black pxs mask" to ignore already masked regions
+            (and also visual markers)
         """
-        image = self.dnoise_img
+        # image = self.nosky_img
+        image = self.preproc_img
         if self.select_new_sample:
             self.select_new_sample = False
             self.pause_stats=True
@@ -857,6 +726,7 @@ class ImagePreprocNode:
             for sample_hist in self.samples:
                 add_mask=cv2.calcBackProject([hsv_image],[0,1],sample_hist,[0,180,0,256],1)
 
+                #TODO: improve refinement
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                 cv2.filter2D(add_mask, -1, kernel, add_mask)
                 # add_mask = self.maskRefinement(add_mask, morph_ops=morph_ops)
@@ -864,14 +734,22 @@ class ImagePreprocNode:
                 _, add_mask = cv2.threshold(add_mask, 50, 255, 0)
 
                 sample_mask=cv2.bitwise_or(sample_mask,add_mask)
-            self.sample_mask=cv2.bitwise_not(sample_mask)
-            self.sample_mask = self.maskRefinement(self.sample_mask, morph_ops=morph_ops)
-            self.res_sample = cv2.bitwise_and(image, image, mask=self.sample_mask)
+            sample_mask=cv2.bitwise_or(sample_mask,self.sky_mask)
+            sample_mask=cv2.bitwise_not(sample_mask)
+            self.sample_mask = self.maskRefinement(sample_mask, morph_ops=morph_ops)
         else:
-            self.res_sample=image
-        if show_result:
-            cv2.imshow(winname_prefix + ' ground sample', cv2.cvtColor(self.res_sample, cv2.COLOR_RGB2BGR))
+            sample_mask = cv2.bitwise_not(self.sky_mask)
+            self.sample_mask = self.maskRefinement(sample_mask, morph_ops=morph_ops)
 
+        self.res_sample = cv2.bitwise_and(image, image, mask=self.sample_mask)
+
+        if show_result:
+            cv2.imshow(winname_prefix + ' ground sample, {} samples'.format(len(self.samples)),
+                       cv2.cvtColor(self.res_sample, cv2.COLOR_RGB2BGR))
+
+
+    #       #       #       #       #       #       #       #
+    # FILTER REFINEMENT     #       #       #
 
     @staticmethod
     def maskRefinement(mask,morph_ops=' ',k_size=5,k_shape=cv2.MORPH_ELLIPSE):
@@ -880,21 +758,28 @@ class ImagePreprocNode:
 
         :param mask: input mask to be refined
         :param morph_ops: ORDERED string of required morph. operations
+                    IF int is passed (as string) selects a predefined set,
+                    increasing intensities of refinement for tested ops combinations
+                        '0','': off
+                        '1': c  LOWER
+                        '2': ce
+                        '3': ceo
+                        '4': ceh
+                        '5': ceoh
+                        '6': ceho   HIGHER
         :param k_size: kernel characteristic size
         :param k_shape: kernel shape:cv2.MORPH_RECT,cv2.MORPH_CROSS,cv2.MORPH_ELLIPSE}
 
-        in some previous test (white book over fuzzy carpet), best combinations (ordered by results):
-            1) open (hitmiss (erode
-            1) dilate (erode
-            2) hitmiss (erode
-            3) dilate (hitmiss
-            4) dilate (open
-            5) hitmiss
-            6) dilate
-            7) erode
-
         TODO: refine number of iterations based on image, samples,...
         """
+        if morph_ops=='' or '0'in morph_ops: pass
+        elif '1'in morph_ops: morph_ops='c'
+        elif '2'in morph_ops: morph_ops='ce'
+        elif '3'in morph_ops: morph_ops='ceo'
+        elif '4'in morph_ops: morph_ops='ceh'
+        elif '5'in morph_ops: morph_ops='ceoh'
+        elif '6'in morph_ops: morph_ops='ceho'
+
         kernel = cv2.getStructuringElement(k_shape, (k_size, k_size))
         for mop in morph_ops:
             if mop=='d'or mop=='dilate':
@@ -911,9 +796,116 @@ class ImagePreprocNode:
         return mask
 
 
+    #       #       #       #       #       #       #       #
+    # SAMPLES TOOLS
+
+    def loadAllSamples(self):
+        """
+        automatical sample loading from a specific directoty
+
+        TODO: saved images must be already temporally-averaged to remove more noise
+        """
+        sample_lib=glob(self.sample_source+"*.jpg")
+        for sample in sample_lib:
+            new_sampl=cv2.imread(sample)
+            try:
+                new_sample = cv2.cvtColor(new_sampl, cv2.COLOR_BGR2HSV)
+                _, _, sample_hist = computeHistogram(new_sample, 'hs', range_normalize=True)
+                sample_hist = sample_hist.astype('float32')
+                self.samples.append(sample_hist)
+            except Exception as exc:
+                print('sample aquisition aborted ' + str(exc)[13])
+        print("number of current samples: {}\n".format(len(self.samples)))
+
+
+    def addNewSample(self,save_sample=False):
+        """
+        manual sample selection from image from a static window
+        test of correlation w/ while image not activated (prevents remotion of PARTICULARS)
+
+        TODO: since selection occours over a single frame of video, it's prone to noise:
+         should select a TEMPORAL MEAN of that region (but rover must stand still)
+
+        TODO: no tested methid permitted to have the program working while selecting:
+         not putting this in a different callback (freezes), spawning another listener,...
+         ALSO: multithreading does not really exist thanks to GIL
+         BUT: nogil
+
+        TODO: comparison between histograms of samples and whole image/dominant colors
+            will be required for automatic selection of samples
+         histogram comparison methods and relative tested data (static setup)
+         hist_compare_dict = {
+            "Correlation", (cv2.HISTCMP_CORREL, 0.2),  # or  0.4
+            "Chi-Squared", (cv2.HISTCMP_CHISQR, 10000000),
+            "Intersection", (cv2.HISTCMP_INTERSECT, 0.45),
+            "Hellinger", (cv2.HISTCMP_BHATTACHARYYA, 0),
+            "Kullback-Leibler", (cv2.HISTCMP_KL_DIV, 500)}
+         _,_,image_hist=computeHistogram(image,'hs',range_normalize=True)
+         if cv2.compareHist(image_hist,sample_hist,hist_compare_method)>hist_compare_thres or bypass_comp:
+
+        TODO: temporally average samples by collecting @same ROI for some time;
+            once ROI coords are selected, use the image stream for some time
+            https://docs.opencv.org/2.4/modules/core/doc/operations_on_arrays.html#addweighted
+            https://leslietj.github.io/2020/06/28/How-to-Average-Images-Using-OpenCV/
+            https://stackoverflow.com/questions/20175143/get-the-mean-of-sequence-of-frames
+        """
+        IMGS_TO_ACCUMULATE=5
+        # ACCUMULATOR_WEIGHT=1/IMGS_TO_ACCUMULATE
+        winname="MOUSE+ENTER for selection,ESC to exit"
+        img=self.preproc_img
+        rois=cv2.selectROIs(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
+        cv2.destroyWindow(winname)
+        time.sleep(3)
+        for (roi_x0,roi_y0,roi_x,roi_y) in rois:
+            try:
+                # new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
+                # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
+                # _,_,sample_hist=computeHistogram(new_sample,'hs',range_normalize=True)
+                # sample_hist=sample_hist.astype('float32')
+                # imgs accumulations to reject noise w/ temporal mean
+                sample_accumulator=np.zeros((roi_y,roi_x,self.camera_channels))
+                for count in range(IMGS_TO_ACCUMULATE):
+                    print(count)
+                    img=self.preproc_img
+                    cv2.imshow('img', img)
+                    time.sleep(2)
+                    # new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
+                    # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
+                    # cv2.imshow('sample', new_sample)
+                    # time.sleep(2)
+                    # # cv2.accumulateWeighted(new_sample,sample_accumulator,ACCUMULATOR_WEIGHT)
+                    # cv2.accumulate(new_sample,sample_accumulator)
+                    # cv2.imshow('acc', sample_accumulator)
+                    # time.sleep(2)
+
+                sample_accumulator/=IMGS_TO_ACCUMULATE
+                _,_,sample_hist=computeHistogram(sample_accumulator,'hs',range_normalize=True)
+                sample_hist=sample_hist.astype('float32')
+                self.samples.append(sample_hist)
+            except Exception as exc:
+                print('sample aquisition aborted '+str(exc)[13])
+            if save_sample:
+                filename='../media/samples/sample_{}.jpg'.format(str(time.time()))
+                try:
+                    cv2.imwrite(filename,cv2.cvtColor(new_sampl,cv2.COLOR_RGB2BGR))
+                    print('saved: {}'.format(filename))
+                except Exception as exc:
+                    print('sample saving unsuccessfull '+str(exc)[13])
+        print("number of current samples: {}".format(len(self.samples)))
+
+
+    def removeAllSamples(self):
+        """
+        removes all samples in self.sample array
+        """
+        self.samples=[]
+        print("number of current samples: {}\n".format(len(self.samples)))
+
+
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-    #   VISUALIZATION TOOLS #   #   #   #   #   #
-    def showChannels(self,noisy='d',channels=' ',downsize_factor=1,winname_prefix='',h_shift=0):
+    #   VISUALIZATION
+
+    def showChannels(self,noisy='p',channels=' ',downsize_factor=1,winname_prefix='',h_shift=0):
         """
         Shows selected image channels
         :param noisy: toggles sim or noisy input
@@ -928,14 +920,14 @@ class ImagePreprocNode:
         :param h_shift: shift the h channel value values toward rigth of the histogram
                         highlighting similarity of values around 0==180 (especially for noisy imgs)
         """
-        if noisy == 'n' or noisy == 'noisy':
-            image = self.noisy_img
-            winname_prefix = winname_prefix + ' NOISY '
-        elif noisy == 'd' or noisy == 'denoised':
-            image = self.dnoise_img
-            winname_prefix = winname_prefix + ' DENOISED '
-        else:
-            image = self.sim_img
+        if noisy == 'p' or noisy == 'preprocessed':
+            image = self.preproc_img
+            winname_prefix = winname_prefix + ' PREPROCESSED '
+        # elif noisy == 'n' or noisy == 'noisy':
+        #     image = self.noisy_img
+        #     winname_prefix = winname_prefix + ' NOISY '
+        # else:
+        #     image = self.sim_img
         if downsize_factor != 1:
             new_size = (int(image.shape[1] / downsize_factor), int(image.shape[0] / downsize_factor))
             image = cv2.resize(image, new_size, interpolation=cv2.INTER_AREA)
@@ -962,7 +954,7 @@ class ImagePreprocNode:
             cv2.imshow(winname_prefix + "GL", gl_out)
 
 
-    def showHistograms(self,channels,noisy='d',winname_prefix=''):
+    def showHistograms(self,channels,noisy='p',winname_prefix=''):
         """
         computes and shows H,S and RGB histograms
         :param noisy: toggles sim or noisy input
@@ -976,14 +968,14 @@ class ImagePreprocNode:
         rgb_scaling = 0.01
         hsv_shift = 15
         rgb_shift=92
-        if noisy == 'n' or noisy == 'noisy':
-            winname_prefix = winname_prefix + ' NOISY '
-            rgb_in_image = self.noisy_img
-        elif noisy == 'd' or noisy == 'denoised':
-            rgb_in_image = self.dnoise_img
-            winname_prefix = winname_prefix + ' DENOISED '
-        else:
-            rgb_in_image = self.sim_img
+        if noisy == 'p' or noisy == 'preprocessed':
+            rgb_in_image = self.preproc_img
+            winname_prefix = winname_prefix + ' PREPROCESSSED '
+        # elif noisy == 'n' or noisy == 'noisy':
+        #     winname_prefix = winname_prefix + ' NOISY '
+        #     rgb_in_image = self.noisy_img
+        # else:
+        #     rgb_in_image = self.sim_img
         shift_text=", SHIFT AMOUNT= " + str(int(rgb_shift*2.56)) + " /256"
         if 'r' in channels or 'f'in channels:
             r_hist, _ = computeHistogram(rgb_in_image, 'r')
@@ -1025,6 +1017,105 @@ class ImagePreprocNode:
         if 'GL' in channels:
             gl_out = cv2.cvtColor(rgb_in_image, cv2.COLOR_RGB2GRAY)
             cv2.imshow(winname_prefix + "GL", gl_out)
+
+
+    #   #   #   #   #   #   #   #   #   #   #   #
+    # MENU
+    def keyAction(self,key):
+        """
+        selects which action to perform pressing the key
+        NOTE: must have the result window highlighted
+        :param key:
+            s: displays sample filter
+            r: displays range filter
+            o: displays otsu filter
+            b: displays balancing filter
+            z: enables all samples in ../media/samples folder for sample filter
+            c: disables all samples
+            l: add new sample(s) to filter from ROI(s) selection;
+                multiple allowed, esc to exit
+            k: same as 'k' & new samples are saved in ./media/samples folder
+            m: toggles morphological operations
+
+        TODO: there is to be, for sure, a more compact way to do so
+        """
+        if key ==ord('r'):
+            cv2.destroyAllWindows()
+            self.toggle_sample = False
+            self.toggle_range = True
+            self.resetStatistics()
+        elif key == ord('s'):
+            cv2.destroyAllWindows()
+            self.toggle_range = False
+            self.toggle_sample = True
+            self.resetStatistics()
+        elif key == ord('m'):
+            # self.toggle_morph = False if self.toggle_morph else True
+            try:
+                morph_amount=int(self.MORPH_OPS)
+                if morph_amount<6:
+                    self.MORPH_OPS=str(morph_amount+1)
+            except ValueError:#catches int(NON_NUMERIC_STR)
+                self.MORPH_OPS ='0'
+        elif key == ord('n'):
+            try:
+                morph_amount=int(self.MORPH_OPS)
+                if morph_amount>0:
+                    self.MORPH_OPS=str(morph_amount-1)
+            except ValueError:
+                self.MORPH_OPS ='0'
+        elif key == ord('z') and not self.addedAllSample:
+            self.addedAllSample=True
+            cv2.destroyAllWindows()
+            self.loadAllSamples()
+            self.resetStatistics()
+        elif key == ord('c') and self.addedAllSample:
+            self.addedAllSample=False
+            cv2.destroyAllWindows()
+            self.removeAllSamples()
+            self.resetStatistics()
+        elif key == ord('k'):
+            self.addNewSample(save_sample=True)
+            cv2.destroyAllWindows()
+        elif key == ord('l'):
+            self.addNewSample()
+            cv2.destroyAllWindows()
+
+
+    #   #   #   #   #   #   #   #   #   #   #   #
+    # STATISTICS
+    def resetStatistics(self):
+        self.ave_time=0
+        self.iter_counter=0
+
+
+    def updateStatistics(self,time_setpoint):
+        """
+        running average for cycle time
+        pause required for misleading results when awiting for user input
+        """
+        self.iter_stamp+=1
+        if not self.pause_stats:
+            self.ave_time = (self.ave_time * self.iter_counter + time.time() - time_setpoint) / (self.iter_counter + 1)
+            print('avg. cycle [ms]: {}'.format(np.round(self.ave_time * 1000, 6)), end='\r')
+            self.iter_counter += 1
+        else:
+            self.pause_stats=False
+
+
+    def dualStatistics(self,sample_t,range_t):
+        """
+        running average for cycle time for rangeFilter() and sampleFilter()
+        """
+        if not self.pause_stats:
+            self.ave_sample_t = (self.ave_sample_t * self.iter_counter + sample_t) / (self.iter_counter + 1)
+            self.ave_range_t = (self.ave_range_t * self.iter_counter + range_t) / (self.iter_counter + 1)
+            display_msg=' RANGE FILTER[ms]:{} SAMPLE FILTER[ms]:{}'
+            print(display_msg.format
+                  (np.round(self.ave_range_t * 1000, 6),np.round(self.ave_sample_t * 1000, 6)), end='\r')
+            self.iter_counter += 1
+        else:
+            self.pause_stats=False
 
 
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #

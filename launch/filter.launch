@@ -1,12 +1,37 @@
 <?xml version="1.0"?>
 <launch>
-	<arg name="unused" default="false" doc="template"/>
+	<arg name="gui_rviz" default="false" doc="opens rviz"/>
+	<arg name="test" default="false" doc="test"/>
 	
-	<node
-		pkg="cv_preproc"
-		type="image_filter.py"
-		name="image_filter"
-		output="screen"
+	
+	<group if="$(arg gui_rviz)">
+	
+	<include 
+	file="$(find leo_erc_viz)/launch/rviz.launch">
+    	<!--arg name="config" default="true" /-->
+ 	</include>	
+	
+	</group>
+	
+	<node if="$(arg test)"
+	pkg="cv_preproc"
+	type="image_filter.py"
+	name="image_filter"
+	output="screen"
 	/>
-
+	<node
+	pkg="cv_preproc"
+	type="noise_simulation.py"
+	name="noise_simulator"
+	output="screen"
+	/>
+	<node
+	pkg="cv_preproc"
+	type="image_filter.py"
+	name="preprocessor"
+	output="screen"
+	/>
+		
+		
+		
 </launch>
