@@ -80,7 +80,7 @@ class ImageNoiseSimulator:
             # NOISY IMAGE OUTPUT
             out_msg=self.cvbridge.cv2_to_imgmsg(self.sim_img)
             self.noisyPublisher.publish(out_msg)
-            self.updateStatistics(this_time)
+            # self.updateStatistics(this_time)
         except CvBridgeError:
             # TODO: self.bridgerror
             print("cv bridge error")

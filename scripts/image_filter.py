@@ -140,7 +140,6 @@ class ImagePreprocNode:
 
         self.preproc_img = np.ndarray
         self.in_dtype = None
-        self.camera_resolution = tuple
         self.camera_channels=int
         self.current_resolution= tuple
         self.print_once_resolution=True
@@ -162,7 +161,7 @@ class ImagePreprocNode:
         self.samples=[]
         self.averaging_samples=[]
         self.sample_mask=None
-        self.sample_source='../media/samples/'
+        self.sample_source='/sim_ws/src/almax/cv_preproc/media/samples/'
         self.addedAllSample=False
 
         self.selected_filter='s'
@@ -172,23 +171,6 @@ class ImagePreprocNode:
         self.toggle_range=False
         self.toggle_morph=True
 
-        #   #   #   #   #   #   #   #   #
-        self.initFilter()
-        # start I/O operations; Subscribe: each time a message comes, Publish: upon request
-        self.filteredPublisher = rospy.Publisher(self.filtered_topic, Image, queue_size=1)
-        self.preprocListener = rospy.Subscriber(self.input_topic, Image, self.inputCallback)
-        #TODO? could a timer solve the callback freeze when selecting sample issue?
-        # TODO ALSO could to set a greater frequency to decrease overhead
-        self.filterTimer=rospy.Timer(rospy.Duration(0.005),self.filterCallback)
-
-        self.morphOpsListener=rospy.Subscriber(self.morph_ops_source,String,self.morphOpsCallback)
-
-        self.addRequestListener=rospy.Subscriber(self.add_sample_source,Bool,self.addSampleCallback)
-        # TODO: for remotion requests; could modify the one above
-        # self.removeRequestListener=...
-
-        # self.imuListener=rospy.Subscriber(self.imu_topic,Imu,self.imuCallback)
-
         #   PERFORMANCES   #   #   #   #   #   #
         self.pause_stats=False
         self.iter_stamp=0
@@ -197,12 +179,31 @@ class ImagePreprocNode:
         self.ave_sample_t=0
         self.ave_range_t=0
 
-
         #   KCLUSTERS     #   #   #   #   #   #
         self.n_colors = 12
         self.cl_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
         self.cl_flags = cv2.KMEANS_RANDOM_CENTERS
-        #   #   #   #   #   ##   #   #   #   #   ##   #   #   #   #   ##   #   #   #   #   #
+
+        #   #   #   #   #   #   #   #   #
+        self.initFilter()
+
+        #   ROS I/O OPERATIONS   #   #   ##   #   #   #   #   ##   #   #   #   #   #
+        self.filteredPublisher = rospy.Publisher(self.filtered_topic, Image, queue_size=1)
+        # self.preprocListener = rospy.Subscriber(self.input_topic, Image, self.inputCallback)
+        #TODO: timer does not solve blocking wait for cv2.selectROIs
+        #   only possible remaining solution is to use a service
+        self.inputTimer = rospy.Timer(rospy.Duration(nsecs=2), self.inputFilterCallback)
+
+        self.morphOpsListener = rospy.Subscriber(self.morph_ops_source, String, self.morphOpsCallback)
+
+        self.addRequestListener = rospy.Subscriber(self.add_sample_source, Bool, self.addSampleCallback)
+        # TODO: for remotion requests; could modify the one above
+        # self.removeRequestListener=...
+
+        # self.imuListener=rospy.Subscriber(self.imu_topic,Imu,self.imuCallback)
+
+        # TODO: timer could be useful to set a greater frequency to decrease overhead
+        self.filterTimer=rospy.Timer(rospy.Duration(nsecs=2),self.filterCallback)
 
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
@@ -211,12 +212,13 @@ class ImagePreprocNode:
         print('initializing...')
         msg = rospy.wait_for_message(self.input_topic, Image)
         image = self.cvbridge.imgmsg_to_cv2(msg, desired_encoding='passthrough')
+        self.preproc_img=image
         # original dtype is uint8, display also accepts float32 (NOTE: result uint8==float32/255)
         self.in_dtype = image.dtype
-        self.camera_resolution = image.shape[:2]
-        print("input resolution: %s" % str(self.camera_resolution))
         self.camera_channels=image.shape[2]
-        self.current_resolution = self.camera_resolution
+        self.current_resolution = image.shape[:2]
+        print("input\nresolution: {}\nchannels: {}\ndepth type: {}".
+              format(str(self.current_resolution),str(self.camera_channels),str(self.in_dtype)))
 
 
     def morphOpsCallback(self,str_msg):
@@ -269,10 +271,26 @@ class ImagePreprocNode:
         """
         try:
             self.preproc_img = self.cvbridge.imgmsg_to_cv2(img_msg, desired_encoding='passthrough')
-
         except CvBridgeError:
             # TODO: self.bridgerror
             print("cv bridge error")
+
+
+    def inputFilterCallback(self,_):
+        """
+        same as above, but using specific rospy.Timer insterad of incoming message to
+            spawn this callback
+
+        TODO: sometimes Timer raises:
+            "AttributeError: 'NoneType' object has no attribute 'close'"
+        """
+        try:
+            img_msg=rospy.wait_for_message(self.input_topic, Image)
+            self.preproc_img = self.cvbridge.imgmsg_to_cv2(img_msg, desired_encoding='passthrough')
+        except CvBridgeError:
+            # TODO: self.bridgerror
+            print("cv bridge error")
+
 
     #    ##################################################################################
 ###    ##################################################################################
@@ -298,15 +316,14 @@ class ImagePreprocNode:
         show_result=True
         win_prefix=''
 
-        self.preMask()
-        if self.toggle_sample:
-            self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
-            out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
-            self.filteredPublisher.publish(out_msg)
-        elif self.toggle_range:
-            self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
-            out_msg = self.cvbridge.cv2_to_imgmsg(self.res_range)
-            self.filteredPublisher.publish(out_msg)
+        # self.preMask()
+        # if self.toggle_sample:
+        #     self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
+        #     self.filtered_img=self.res_sample.copy()
+        # elif self.toggle_range:
+        #     self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
+        #     self.filtered_img=self.res_range.copy()
+        self.distanceFilter(show_result=show_result,dist_method='m')
 
         # this_time = time.time()
         # self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
@@ -318,12 +335,14 @@ class ImagePreprocNode:
         # OUTPUT ------------------------------------------------------------------------------------
         #TODO: superimpose time matermark on output to understand when output stopped
 
-        # self.showHistograms(noisy='d',channels='h')
+        # self.showHistograms(noisy='p',channels='h')
         # self.showChannels(channels='f')
         # self.showChannels(channels='hsv',h_shift=30)
 
-        out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
-        self.filteredPublisher.publish(out_msg)
+        # out_msg = self.cvbridge.cv2_to_imgmsg(self.res_sample)
+        # out_img=cv2.cvtColor(self.filtered_img,cv2.COLOR_RGB2BGR)
+        # out_msg = self.cvbridge.cv2_to_imgmsg(out_img)
+        # self.filteredPublisher.publish(out_msg)
 
         ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##
         k = cv2.waitKey(1) & 0xFF
@@ -631,7 +650,6 @@ class ImagePreprocNode:
             apply contextually an "ignore black pxs mask" to ignore already masked regions
             (and also visual markers)
         """
-        # image = self.nosky_img
         image = self.preproc_img
         hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
         if do_shift:
@@ -654,6 +672,83 @@ class ImagePreprocNode:
         self.res_range = cv2.bitwise_and(image, image, mask=self.range_mask)
         if show_result:
             cv2.imshow(winname_prefix+' ground range',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
+
+
+    def distanceFilter(self,dist_method='mahalanobis',show_result=False,winname_prefix='',morph_ops=' '):
+        """
+        filtering based on color distance;
+
+        :param dist_method: method for distance computation; available:
+                                mahalanobis: weighted on variance
+                                euclidean: simple distance in colorspace
+        :param show_result: displays image of result
+        :param morph_ops: ordered string of morphological operations to perform
+        :param winname_prefix: prefix for window name (when showing result)
+
+        PROS:
+        CONS:
+
+        TODO: use a real device-independent colorspace
+
+        TODO: apply self.sky_mask before to compute here to reduce computation amount
+            apply contextually an "ignore black pxs mask" to ignore already masked regions
+            (and also visual markers)
+
+        https://github.com/tvanslyke/ImageProcessing/blob/master/Mahalanobis.py
+        https://dsp.stackexchange.com/questions/1625/basic-hsb-skin-detection-neon-illumination
+
+        """
+        threshold=50
+        image = self.preproc_img
+        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        distance_mask=np.zeros_like(image,dtype=np.uint8)
+        # mean=np.ndarray([0,0,0])
+        arr = np.reshape(image.copy(), (image.shape[0] * image.shape[1], 3))
+        mean=np.mean(arr,axis=0)
+
+        # distance_mask=self.myMahalanobis(image)
+
+        # inv_var_matrix=cv2.calcCovarMatrix(image,mean,cv2.COVAR_NORMAL)
+        inv_var_matrix = np.linalg.inv(np.cov(np.transpose(arr)))
+        for row in range(int(self.current_resolution[0])):
+            for col in range(int(self.current_resolution[1])):
+                pixel=image[row,col,:]
+                if dist_method=='mahalanobis' or 'm'in dist_method:
+                    if cv2.Mahalanobis(mean, pixel, inv_var_matrix)<threshold:
+                        distance_mask[row,col]=255
+                    else:
+                        distance_mask[row,col]=0
+                elif dist_method=='euclidean' or 'e'in dist_method:
+                    if cv2.norm(pixel-mean, cv2.NORM_L2)<threshold:
+                        distance_mask[row,col]=255
+                    else:
+                        distance_mask[row,col]=0
+        # distance_mask = cv2.bitwise_or(distance_mask, self.sky_mask)
+        # distance_mask = cv2.bitwise_not(distance_mask)
+        # self.distance_mask_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
+        # self.res_distance = cv2.bitwise_and(image, image, mask=self.distance_mask)
+        if show_result:
+            # cv2.imshow(winname_prefix+' ground range',cv2.cvtColor(self.res_distance,cv2.COLOR_RGB2BGR))
+            cv2.imshow('distance mask', distance_mask)
+
+    @staticmethod
+    def myMahalanobis(img, mean_pix=None):
+        """
+        improved mahalanobis distance using Einstein summation convention that avoids loops
+        :param img:         Input image to compute mahalanobis distance on.
+        :param mean_pix:    mean value to compute distance with;
+                            if None provided, will use img's mean
+                            ASSUMED COLUMN VECTOR
+        """
+        arr = np.reshape(img, (img.shape[0] * img.shape[1], 3))
+        invcovar = np.linalg.inv(np.cov(np.transpose(arr)))
+
+        meandiff = arr - (mean_pix if mean_pix is not None else np.mean(arr, axis=0))
+        #
+
+        output = np.dot(meandiff, invcovar)
+
+        return np.sqrt(np.einsum('ij,ij->i', output, meandiff)).reshape(img.shape[:-1])
 
 
     def sampleFilter(self,show_result=False, winname_prefix='', morph_ops=' '):
@@ -712,7 +807,6 @@ class ImagePreprocNode:
             apply contextually an "ignore black pxs mask" to ignore already masked regions
             (and also visual markers)
         """
-        # image = self.nosky_img
         image = self.preproc_img
         if self.select_new_sample:
             self.select_new_sample = False
@@ -795,28 +889,32 @@ class ImagePreprocNode:
                 mask=cv2.morphologyEx(mask.copy(), cv2.MORPH_CLOSE, kernel)
         return mask
 
-
     #       #       #       #       #       #       #       #
     # SAMPLES TOOLS
 
-    def loadAllSamples(self):
+    def loadAllSamples(self,sample_lib=''):
         """
         automatical sample loading from a specific directoty
 
         TODO: saved images must be already temporally-averaged to remove more noise
         """
-        sample_lib=glob(self.sample_source+"*.jpg")
-        for sample in sample_lib:
-            new_sampl=cv2.imread(sample)
-            try:
-                new_sample = cv2.cvtColor(new_sampl, cv2.COLOR_BGR2HSV)
-                _, _, sample_hist = computeHistogram(new_sample, 'hs', range_normalize=True)
-                sample_hist = sample_hist.astype('float32')
-                self.samples.append(sample_hist)
-            except Exception as exc:
-                print('sample aquisition aborted ' + str(exc)[13])
-        print("number of current samples: {}\n".format(len(self.samples)))
+        if sample_lib=='':
+            sample_lib=glob(self.sample_source+"*.jpg")
 
+        if sample_lib:
+            for sample in sample_lib:
+                new_sampl=cv2.imread(sample)
+                try:
+                    new_sample = cv2.cvtColor(new_sampl, cv2.COLOR_BGR2HSV)
+                    _, _, sample_hist = computeHistogram(new_sample, 'hs', range_normalize=True)
+                    sample_hist = sample_hist.astype('float32')
+                    self.samples.append(sample_hist)
+                except Exception as exc:
+                    print('sample aquisition aborted ' + str(exc)[13])
+            print("number of current samples: {}\n".format(len(self.samples)))
+        else:
+            self.addedAllSample=False
+            print('No salmple found in selected folder')
 
     def addNewSample(self,save_sample=False):
         """
@@ -849,26 +947,25 @@ class ImagePreprocNode:
             https://leslietj.github.io/2020/06/28/How-to-Average-Images-Using-OpenCV/
             https://stackoverflow.com/questions/20175143/get-the-mean-of-sequence-of-frames
         """
-        IMGS_TO_ACCUMULATE=5
+        # IMGS_TO_ACCUMULATE=5
         # ACCUMULATOR_WEIGHT=1/IMGS_TO_ACCUMULATE
         winname="MOUSE+ENTER for selection,ESC to exit"
         img=self.preproc_img
         rois=cv2.selectROIs(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
         cv2.destroyWindow(winname)
-        time.sleep(3)
         for (roi_x0,roi_y0,roi_x,roi_y) in rois:
             try:
-                # new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
-                # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
-                # _,_,sample_hist=computeHistogram(new_sample,'hs',range_normalize=True)
-                # sample_hist=sample_hist.astype('float32')
-                # imgs accumulations to reject noise w/ temporal mean
-                sample_accumulator=np.zeros((roi_y,roi_x,self.camera_channels))
-                for count in range(IMGS_TO_ACCUMULATE):
-                    print(count)
-                    img=self.preproc_img
-                    cv2.imshow('img', img)
-                    time.sleep(2)
+                new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
+                new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
+                _,_,sample_hist=computeHistogram(new_sample,'hs',range_normalize=True)
+                sample_hist=sample_hist.astype('float32')
+
+                #TODO: sample accumulation (temporal mean) to reject noise
+                # requires an action, otherwise will always block waiting for this
+                # sample_accumulator=np.zeros((roi_y,roi_x,self.camera_channels))
+                # for count in range(IMGS_TO_ACCUMULATE):
+                #     img=self.preproc_img
+                #     cv2.imshow('img', img)
                     # new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
                     # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
                     # cv2.imshow('sample', new_sample)
@@ -876,16 +973,13 @@ class ImagePreprocNode:
                     # # cv2.accumulateWeighted(new_sample,sample_accumulator,ACCUMULATOR_WEIGHT)
                     # cv2.accumulate(new_sample,sample_accumulator)
                     # cv2.imshow('acc', sample_accumulator)
-                    # time.sleep(2)
-
-                sample_accumulator/=IMGS_TO_ACCUMULATE
-                _,_,sample_hist=computeHistogram(sample_accumulator,'hs',range_normalize=True)
-                sample_hist=sample_hist.astype('float32')
+                # sample_accumulator/=IMGS_TO_ACCUMULATE
+                # _,_,sample_hist=computeHistogram(sample_accumulator,'hs',range_normalize=True)
                 self.samples.append(sample_hist)
             except Exception as exc:
                 print('sample aquisition aborted '+str(exc)[13])
             if save_sample:
-                filename='../media/samples/sample_{}.jpg'.format(str(time.time()))
+                filename=self.sample_source+'sample_{}.jpg'.format(str(time.time()))
                 try:
                     cv2.imwrite(filename,cv2.cvtColor(new_sampl,cv2.COLOR_RGB2BGR))
                     print('saved: {}'.format(filename))
@@ -1069,7 +1163,7 @@ class ImagePreprocNode:
             cv2.destroyAllWindows()
             self.loadAllSamples()
             self.resetStatistics()
-        elif key == ord('c') and self.addedAllSample:
+        elif key == ord('c') and len(self.samples)>0:
             self.addedAllSample=False
             cv2.destroyAllWindows()
             self.removeAllSamples()
@@ -1153,6 +1247,12 @@ COLORE MEDIO vs COLORI DOMINANTI
     
     DOMINANTI:      autovettori
                     k clustering -> slow (~200ms cycle)
+
+DISTANZA DI COLORE (MAHALANOBIS, ...)
+
+    
+    https://github.com/tvanslyke/ImageProcessing/blob/master/Mahalanobis.py
+    https://dsp.stackexchange.com/questions/1625/basic-hsb-skin-detection-neon-illumination
 
 
 FILTRI

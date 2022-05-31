@@ -1,37 +1,40 @@
 <?xml version="1.0"?>
 <launch>
 	<arg name="gui_rviz" default="false" doc="opens rviz"/>
-	<arg name="test" default="false" doc="test"/>
+	<arg name="debug" default="true" doc="toggles off nodes in development"/>
 	
-	
-	<group if="$(arg gui_rviz)">
-	
-	<include 
-	file="$(find leo_erc_viz)/launch/rviz.launch">
-    	<!--arg name="config" default="true" /-->
- 	</include>	
-	
-	</group>
-	
-	<node if="$(arg test)"
-	pkg="cv_preproc"
-	type="image_filter.py"
-	name="image_filter"
-	output="screen"
-	/>
+	<include if="$(arg gui_rviz)"
+		file="$(find leo_erc_viz)/launch/rviz.launch">
+		<!--arg name="config" default="true" /-->
+	</include>
+
+	<include
+		file="$(find leo_erc_teleop)/launch/joy_teleop.launch">
+	</include>
+<!--	TODO: OPEN IN DIFFERENT TERMINALS (PANELS) TO VISUALIZE CYCLE SPEED-->
 	<node
-	pkg="cv_preproc"
-	type="noise_simulation.py"
-	name="noise_simulator"
-	output="screen"
+		pkg="cv_preproc"
+		type="noise_simulation.py"
+		name="noise_simulator"
+		output="screen"
+		respawn="true"
 	/>
+
 	<node
-	pkg="cv_preproc"
-	type="image_filter.py"
-	name="preprocessor"
-	output="screen"
+		pkg="cv_preproc"
+		type="preprocessor.py"
+		name="preprocessor"
+		output="screen"
+		respawn="true"
 	/>
-		
-		
+
+	<node unless="$(arg debug)"
+		pkg="cv_preproc"
+		type="image_filter.py"
+		name="image_filter"
+		output="screen"
+		respawn="true"
+	  	respawn_delay="3"
+	/>
 		
 </launch>
