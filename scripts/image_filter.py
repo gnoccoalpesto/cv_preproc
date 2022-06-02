@@ -167,8 +167,8 @@ class ImagePreprocNode:
         self.selected_filter='s'
         # available filters:    s   sample
         #                       r   range
-        self.toggle_sample=True
-        self.toggle_range=False
+        self.toggle_sample=False
+        self.toggle_range=True
         self.toggle_morph=True
 
         #   PERFORMANCES   #   #   #   #   #   #
@@ -178,6 +178,7 @@ class ImagePreprocNode:
         self.ave_time=0
         self.ave_sample_t=0
         self.ave_range_t=0
+        self.ave_dist_t=0
 
         #   KCLUSTERS     #   #   #   #   #   #
         self.n_colors = 12
@@ -217,7 +218,7 @@ class ImagePreprocNode:
         self.in_dtype = image.dtype
         self.camera_channels=image.shape[2]
         self.current_resolution = image.shape[:2]
-        print("input\nresolution: {}\nchannels: {}\ndepth type: {}".
+        print("INPUT\t==\t==\t==\n resolution: {}\n channels: {}\n depth type: {}".
               format(str(self.current_resolution),str(self.camera_channels),str(self.in_dtype)))
 
 
@@ -292,7 +293,7 @@ class ImagePreprocNode:
             print("cv bridge error")
 
 
-    #    ##################################################################################
+#    ##################################################################################
 ###    ##################################################################################
 ######    ##################################################################################
 
@@ -314,23 +315,15 @@ class ImagePreprocNode:
         morph_ops = self.MORPH_OPS# if self.toggle_morph else ''
 
         show_result=True
-        win_prefix=''
 
-        # self.preMask()
-        # if self.toggle_sample:
-        #     self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
-        #     self.filtered_img=self.res_sample.copy()
-        # elif self.toggle_range:
-        #     self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
-        #     self.filtered_img=self.res_range.copy()
-        self.distanceFilter(show_result=show_result,dist_method='m')
+        self.preMask()
+        if self.toggle_sample:
+            self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
+            self.filtered_img=self.res_sample.copy()
+        elif self.toggle_range:
+            self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
+            self.filtered_img=self.res_range.copy()
 
-        # this_time = time.time()
-        # self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
-        # sample_time = time.time() - this_time
-        # this_time = time.time()
-        # self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
-        # range_time = time.time() - this_time
 
         # OUTPUT ------------------------------------------------------------------------------------
         #TODO: superimpose time matermark on output to understand when output stopped
@@ -352,7 +345,6 @@ class ImagePreprocNode:
             # print(k)
             self.keyAction(k)
         self.updateStatistics(that_time)
-        # self.dualStatistics(sample_time,range_time)
 
 ######    ##################################################################################
 ###    ##################################################################################
@@ -539,7 +531,7 @@ class ImagePreprocNode:
         otsu_mask = self.maskRefinement(otsu_mask,morph_ops=morph_ops)
         res_otsu=cv2.bitwise_and(image,image,mask=otsu_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ground otsu',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' OTSU FILTER RESULT',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
 
 
     # -- UNUSED --
@@ -559,7 +551,7 @@ class ImagePreprocNode:
         ada_mask = cv2.bitwise_not(ada_mask)
         res_ada = cv2.bitwise_and(image, image, mask=ada_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ground ada', cv2.cvtColor(res_ada, cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' ADAPTIVE FILTER RESULT', cv2.cvtColor(res_ada, cv2.COLOR_RGB2BGR))
 
 
     def balancedFilter(self,show_result=False,winname_prefix='',morph_ops=' '):
@@ -589,7 +581,7 @@ class ImagePreprocNode:
         res_bal=cv2.bitwise_and(image,image,mask=bal_mask)
 
         if show_result:
-            cv2.imshow(winname_prefix+' ground bal',cv2.cvtColor(self.res_bal,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' BALANCED FILTER RESULT',cv2.cvtColor(self.res_bal,cv2.COLOR_RGB2BGR))
 
     @staticmethod
     def balanced_hist_thresholding(hist):
@@ -671,12 +663,13 @@ class ImagePreprocNode:
         self.range_mask = self.maskRefinement(range_mask,morph_ops=morph_ops)
         self.res_range = cv2.bitwise_and(image, image, mask=self.range_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ground range',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' RANGE FILTER RESULT',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
 
 
     def distanceFilter(self,dist_method='mahalanobis',show_result=False,winname_prefix='',morph_ops=' '):
         """
         filtering based on color distance;
+        improved using Einstein summation convention that avoids loops which are extremely slow
 
         :param dist_method: method for distance computation; available:
                                 mahalanobis: weighted on variance
@@ -686,7 +679,7 @@ class ImagePreprocNode:
         :param winname_prefix: prefix for window name (when showing result)
 
         PROS:
-        CONS:
+        CONS:       slow
 
         TODO: use a real device-independent colorspace
 
@@ -698,57 +691,41 @@ class ImagePreprocNode:
         https://dsp.stackexchange.com/questions/1625/basic-hsb-skin-detection-neon-illumination
 
         """
-        threshold=50
         image = self.preproc_img
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
-        distance_mask=np.zeros_like(image,dtype=np.uint8)
-        # mean=np.ndarray([0,0,0])
-        arr = np.reshape(image.copy(), (image.shape[0] * image.shape[1], 3))
-        mean=np.mean(arr,axis=0)
+        threshold=3
 
-        # distance_mask=self.myMahalanobis(image)
+        distance_mask=self.myDistance(image,dist_method=dist_method)
+        _,distance_mask=cv2.threshold(distance_mask, threshold, 255,cv2.THRESH_BINARY_INV)
 
-        # inv_var_matrix=cv2.calcCovarMatrix(image,mean,cv2.COVAR_NORMAL)
-        inv_var_matrix = np.linalg.inv(np.cov(np.transpose(arr)))
-        for row in range(int(self.current_resolution[0])):
-            for col in range(int(self.current_resolution[1])):
-                pixel=image[row,col,:]
-                if dist_method=='mahalanobis' or 'm'in dist_method:
-                    if cv2.Mahalanobis(mean, pixel, inv_var_matrix)<threshold:
-                        distance_mask[row,col]=255
-                    else:
-                        distance_mask[row,col]=0
-                elif dist_method=='euclidean' or 'e'in dist_method:
-                    if cv2.norm(pixel-mean, cv2.NORM_L2)<threshold:
-                        distance_mask[row,col]=255
-                    else:
-                        distance_mask[row,col]=0
-        # distance_mask = cv2.bitwise_or(distance_mask, self.sky_mask)
-        # distance_mask = cv2.bitwise_not(distance_mask)
-        # self.distance_mask_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
-        # self.res_distance = cv2.bitwise_and(image, image, mask=self.distance_mask)
+        distance_mask = cv2.bitwise_or(distance_mask.astype('uint8'), self.sky_mask)
+        distance_mask = cv2.bitwise_not(distance_mask)
+        self.distance_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
+        self.res_distance = cv2.bitwise_and(image, image, mask=self.distance_mask)
         if show_result:
-            # cv2.imshow(winname_prefix+' ground range',cv2.cvtColor(self.res_distance,cv2.COLOR_RGB2BGR))
-            cv2.imshow('distance mask', distance_mask)
+            cv2.imshow(winname_prefix+' DISTANCE FILTER RESULT',cv2.cvtColor(self.res_distance,cv2.COLOR_RGB2BGR))
+            # cv2.imshow('distance mask', distance_mask)
 
     @staticmethod
-    def myMahalanobis(img, mean_pix=None):
+    def myDistance(img, dist_method='mahalanobis',mean_pix=None):
         """
-        improved mahalanobis distance using Einstein summation convention that avoids loops
+        Einstain summation convention distance computation
         :param img:         Input image to compute mahalanobis distance on.
         :param mean_pix:    mean value to compute distance with;
                             if None provided, will use img's mean
                             ASSUMED COLUMN VECTOR
+                            ASSUMED COLUMN VECTOR
+        :param dist_method: method for distance computation; available:
+                                mahalanobis: weighted on variance
+                                euclidean: simple distance in colorspace
         """
         arr = np.reshape(img, (img.shape[0] * img.shape[1], 3))
-        invcovar = np.linalg.inv(np.cov(np.transpose(arr)))
-
         meandiff = arr - (mean_pix if mean_pix is not None else np.mean(arr, axis=0))
-        #
-
-        output = np.dot(meandiff, invcovar)
-
-        return np.sqrt(np.einsum('ij,ij->i', output, meandiff)).reshape(img.shape[:-1])
+        if dist_method=='mahalanobis' or 'm' in dist_method:
+            invcovar = np.linalg.inv(np.cov(np.transpose(arr)))
+            output = np.dot(meandiff, invcovar)
+            return np.sqrt(np.einsum('ij,ij->i', output, meandiff)).reshape(img.shape[:-1])
+        # dist_method=='euclidean'
+        return np.sqrt(np.einsum('ij,ij->i',meandiff, meandiff)).reshape(img.shape[:-1])
 
 
     def sampleFilter(self,show_result=False, winname_prefix='', morph_ops=' '):
@@ -838,7 +815,7 @@ class ImagePreprocNode:
         self.res_sample = cv2.bitwise_and(image, image, mask=self.sample_mask)
 
         if show_result:
-            cv2.imshow(winname_prefix + ' ground sample, {} samples'.format(len(self.samples)),
+            cv2.imshow(winname_prefix + ' SAMPLE FILTER RESULT, {} samples'.format(len(self.samples)),
                        cv2.cvtColor(self.res_sample, cv2.COLOR_RGB2BGR))
 
 
@@ -899,7 +876,8 @@ class ImagePreprocNode:
         TODO: saved images must be already temporally-averaged to remove more noise
         """
         if sample_lib=='':
-            sample_lib=glob(self.sample_source+"*.jpg")
+            sample_lib=self.sample_source
+        sample_lib=glob(sample_lib+"*.jpg")
 
         if sample_lib:
             for sample in sample_lib:
@@ -1191,22 +1169,26 @@ class ImagePreprocNode:
         self.iter_stamp+=1
         if not self.pause_stats:
             self.ave_time = (self.ave_time * self.iter_counter + time.time() - time_setpoint) / (self.iter_counter + 1)
-            print('avg. cycle [ms]: {}'.format(np.round(self.ave_time * 1000, 6)), end='\r')
+            print(' avg. cycle [ms]: {}'.format(np.round(self.ave_time * 1000, 6)), end='\r')
             self.iter_counter += 1
         else:
             self.pause_stats=False
 
 
-    def dualStatistics(self,sample_t,range_t):
+    def multiStatistics(self,sample_t,range_t,dist_t):
         """
         running average for cycle time for rangeFilter() and sampleFilter()
         """
         if not self.pause_stats:
             self.ave_sample_t = (self.ave_sample_t * self.iter_counter + sample_t) / (self.iter_counter + 1)
             self.ave_range_t = (self.ave_range_t * self.iter_counter + range_t) / (self.iter_counter + 1)
-            display_msg=' RANGE FILTER[ms]:{} SAMPLE FILTER[ms]:{}'
-            print(display_msg.format
-                  (np.round(self.ave_range_t * 1000, 6),np.round(self.ave_sample_t * 1000, 6)), end='\r')
+            self.ave_dist_t = (self.ave_dist_t * self.iter_counter + dist_t) / (self.iter_counter + 1)
+            display_msg=' RANGE FILTER: SAMPLE F.:, DISTANCE F.: [ms]'
+            print(display_msg)
+            print('{}\t\t{}\t\t{}'.format
+                  (np.round(self.ave_range_t * 1000, 4),
+                   np.round(self.ave_sample_t * 1000, 4),
+                   np.round(self.ave_dist_t * 1000, 4)), end='\r')
             self.iter_counter += 1
         else:
             self.pause_stats=False
