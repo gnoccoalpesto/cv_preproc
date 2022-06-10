@@ -119,10 +119,8 @@ class ImagePreprocNode:
                         'nsyHazCam':"/camera/image_raw/noisy",
                         'prprocHazCam':"/camera/image_raw/preproc"}
 
-        # self.input_topic = rospy.get_param(
-        #     '/image_preproc/preproc_camera_topic',camera_dict['prprocHazCam'])
-        self.input_topic = "/zed2/left_raw/image_raw_color"
-        # /camera/image_raw
+        self.input_topic = rospy.get_param(
+            '/image_preproc/preproc_camera_topic',camera_dict['prprocHazCam'])
 
         self.filtered_topic = "/camera/image_raw/filtered"
         print('listened topic: ' + self.input_topic)

@@ -1,6 +1,5 @@
 <?xml version="1.0"?>
 <launch>
-	<arg name="gara" default="false" />
 	<arg name="gui_rviz" default="false" doc="opens rviz"/>
 	<arg name="debug" default="true" doc="toggles off nodes in development"/>
 	
@@ -13,7 +12,7 @@
 		file="$(find leo_erc_teleop)/launch/joy_teleop.launch">
 	</include>
 <!--	TODO: OPEN IN DIFFERENT TERMINALS (PANELS) TO VISUALIZE CYCLE SPEED-->
-	<node unless="$(arg gara)"
+	<node
 		pkg="cv_preproc"
 		type="noise_simulation.py"
 		name="noise_simulator"
