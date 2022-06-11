@@ -2,16 +2,15 @@
 <launch>
 	<arg name="gui_rviz" default="false" doc="opens rviz"/>
 	<arg name="debug" default="true" doc="toggles off nodes in development"/>
-	
-	<include if="$(arg gui_rviz)"
-		file="$(find leo_erc_viz)/launch/rviz.launch">
-		<!--arg name="config" default="true" /-->
-	</include>
+	<arg name="gara" default="false" doc="if true, does not use simulation, noise creation,..."/>
+	<arg name="manual_control" default="true" doc="manual rover control w/ joystick"/>
 
-	<include
-		file="$(find leo_erc_teleop)/launch/joy_teleop.launch">
-	</include>
-<!--	TODO: OPEN IN DIFFERENT TERMINALS (PANELS) TO VISUALIZE CYCLE SPEED-->
+<!--	TODO: SET UP DIFFERENT TEERMINALS FOR NODES NEEDING THEM-->
+
+<!--	SIMULATION -->
+<group unless="$(arg gara)">
+<!--	gazebo: STARTS AUTONOMOUSLY-->
+
 	<node
 		pkg="cv_preproc"
 		type="noise_simulation.py"
@@ -19,7 +18,20 @@
 		output="screen"
 		respawn="true"
 	/>
+</group>
 
+<!--	RVIZ-->
+	<include if="$(arg gui_rviz)"
+		file="$(find leo_erc_viz)/launch/rviz.launch">
+		<!--arg name="config" default="true" /-->
+	</include>
+
+<!--	CONTROL-->
+	<!--<include if="$(arg manual_control)"
+		file="$(find leo_erc_teleop)/launch/joy_teleop.launch">
+	</include>-->
+
+<!--	IMAGE PROCESSING-->
 	<node
 		pkg="cv_preproc"
 		type="preprocessor.py"
@@ -27,8 +39,7 @@
 		output="screen"
 		respawn="true"
 	/>
-
-	<node unless="$(arg debug)"
+	<node
 		pkg="cv_preproc"
 		type="image_filter.py"
 		name="image_filter"
@@ -36,5 +47,12 @@
 		respawn="true"
 	  	respawn_delay="3"
 	/>
-		
+	<node unless="$(arg debug)"
+		pkg="cv_preproc"
+		type="object_detector.py"
+		name="object_detector"
+		output="screen"
+		respawn="true"
+	  	respawn_delay="3"
+	/>
 </launch>
