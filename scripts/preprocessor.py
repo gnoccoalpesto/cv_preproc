@@ -51,10 +51,10 @@ class ImagePreprocessor:
         self.iter_count=0
 
         # ROS I/O
-        self.noisyListener = rospy.Subscriber(self.input_topic, Image, self.preprocessCallback)
-        self.preprocPublisher = rospy.Publisher(self.preproc_topic, Image, queue_size=1)
         self.depth_sub = rospy.Subscriber(self.depth_topic, Image, self.depthCallback)
         self.depthPreproc_pub = rospy.Publisher(self.depth_preproc_topic, Image, queue_size=1)
+        self.noisyListener = rospy.Subscriber(self.input_topic, Image, self.preprocessCallback)
+        self.preprocPublisher = rospy.Publisher(self.preproc_topic, Image, queue_size=1)
 
 
     def initPreprocessor(self):
@@ -78,10 +78,12 @@ class ImagePreprocessor:
             self.noiseRemotion(do_denoise=True)
 
             # NOISY IMAGE OUTPUT
-            out_msg=self.cvbridge.cv2_to_imgmsg(self.preproc_img)
-            out_depth=self.cvbridge.cv2_to_imgmsg(self.depth_img)
-            self.preprocPublisher.publish(out_msg)
-            self.depthPreproc_pub.publish(out_depth)
+            try:
+                out_msg=self.cvbridge.cv2_to_imgmsg(self.preproc_img)
+                out_depth=self.cvbridge.cv2_to_imgmsg(self.depth_img)
+                self.preprocPublisher.publish(out_msg)
+                self.depthPreproc_pub.publish(out_depth)
+            except Exception:pass
             # self.updateStatistics(this_time)
         except CvBridgeError:
             # TODO: self.bridgerror

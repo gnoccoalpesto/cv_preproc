@@ -27,9 +27,9 @@
 	</include>
 
 <!--	CONTROL-->
-	<!--<include if="$(arg manual_control)"
+	<include if="$(arg manual_control)"
 		file="$(find leo_erc_teleop)/launch/joy_teleop.launch">
-	</include>-->
+	</include>
 
 <!--	IMAGE PROCESSING-->
 	<node
