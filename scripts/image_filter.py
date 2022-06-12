@@ -146,6 +146,7 @@ class ImagePreprocNode:
         self.add_sample_source='image_preproc/add_request'
         # depth data already subsampled of same amount
         self.depth_topic='/zed2/depth/depth_preproc'
+        # / zed2 / depth / depth_registered
         # imu_dict = {'imu': "/imu/data_raw",
         #             'camera': "/zed2/imu/data"}
         # self.imu_topic=imu_dict['imu']
@@ -164,6 +165,7 @@ class ImagePreprocNode:
 
         self.MORPH_OPS='1'#=='c'
 
+        self.MENU_IMAGE=np.ndarray
         self.res_sample= np.ndarray
         self.res_range= np.ndarray
         self.sample_mask= np.ndarray
@@ -175,6 +177,10 @@ class ImagePreprocNode:
         self.sample_source='/sim_ws/src/almax/cv_preproc/media/samples/'
         self.addedAllSample=False
 
+        self.SHOW_RESULT=True
+        self.selected_premask='c'
+        # available premasks:   c   color
+        #                       d   depth
         self.selected_filter='r'
         # available filters:    s   sample
         #                       r   range
@@ -234,6 +240,18 @@ class ImagePreprocNode:
         self.current_resolution = image.shape[:2]
         self.sky_mask=np.zeros_like(image)
         self.depth_mask=np.zeros_like(image)
+        self.MENU_IMAGE=np.zeros_like(image)
+        MENU_TEXT="Esc: exit (RESPAWNS: Ctrl+C in terminal)\ns: displays sample filter\nr: displays range filter\n"
+        MENU_TEXT=MENU_TEXT+"z: enables all samples in ../media/samples folder for sample filter\nx: disables all samples\n"
+        MENU_TEXT=MENU_TEXT+"l: add new sample(s) to filter from ROI(s) selection;\n      multiple allowed, esc to exit\n"
+        MENU_TEXT=MENU_TEXT+"k: same as 'k' & new samples are saved in ./media/samples folder\nm: increase morphological operations amount\n"
+        MENU_TEXT=MENU_TEXT+"n: decrease morphological operations amount\nd: select depth based (sky) prefilter\n"
+        MENU_TEXT = MENU_TEXT +"c: select color based (sky) prefilter\n"
+        y0, dy = 10, cv2.getTextSize(MENU_TEXT,cv2.FONT_HERSHEY_SIMPLEX,1,2)[0][1]
+        # text splitting and multi line printing
+        for ii, line in enumerate(MENU_TEXT.split('\n')):
+            y = y0 + ii * int(1.2*dy)
+            cv2.putText(self.MENU_IMAGE,line,(10,y),cv2.FONT_HERSHEY_SIMPLEX,0.5,(255,255,255))
         print("INPUT\t==\t==\t==\n resolution: {}\n channels: {}\n depth type: {}".
               format(str(self.current_resolution),str(self.camera_channels),str(self.in_dtype)))
 
@@ -344,13 +362,16 @@ class ImagePreprocNode:
 
         # BACKGROUND FILTERING -------------------------------------------------------------------------
         morph_ops = self.MORPH_OPS# if self.toggle_morph else ''
-        show_result=False
-        self.preMask(sky_mask_method='d')
+
+        if not self.SHOW_RESULT:
+            cv2.imshow("menu",self.MENU_IMAGE)
+
+        self.preMask(sky_mask_method=self.selected_premask)
         if self.toggle_sample:
-            self.sampleFilter(show_result=show_result, morph_ops=morph_ops)
+            self.sampleFilter(show_result=self.SHOW_RESULT, morph_ops=morph_ops)
             self.filtered_img=self.res_sample.copy()
         elif self.toggle_range:
-            self.rangeFilter(show_result=show_result, morph_ops=morph_ops)
+            self.rangeFilter(show_result=self.SHOW_RESULT, morph_ops=morph_ops)
             self.filtered_img=self.res_range.copy()
 
 
@@ -1143,14 +1164,17 @@ class ImagePreprocNode:
         :param key:
             s: displays sample filter
             r: displays range filter
-            o: displays otsu filter
-            b: displays balancing filter
+            o: displays otsu filter         --- REMOVED
+            b: displays balancing filter    --- REMOVED
             z: enables all samples in ../media/samples folder for sample filter
-            c: disables all samples
+            x: disables all samples
             l: add new sample(s) to filter from ROI(s) selection;
                 multiple allowed, esc to exit
             k: same as 'k' & new samples are saved in ./media/samples folder
-            m: toggles morphological operations
+            m: increase morphological operations amount
+            n: decrease morphological operations amount
+            d: select depth based (sky) prefilter
+            c: select color based (sky) prefilter
 
         TODO: there is to be, for sure, a more compact way to do so
         """
@@ -1184,7 +1208,7 @@ class ImagePreprocNode:
             cv2.destroyAllWindows()
             self.loadAllSamples()
             self.resetStatistics()
-        elif key == ord('c') and len(self.samples)>0:
+        elif key == ord('x') and len(self.samples)>0:
             self.addedAllSample=False
             cv2.destroyAllWindows()
             self.removeAllSamples()
@@ -1195,6 +1219,11 @@ class ImagePreprocNode:
         elif key == ord('l'):
             self.addNewSample()
             cv2.destroyAllWindows()
+        elif key == ord('d'):
+            self.selected_premask='d'
+        elif key == ord('c'):
+            self.selected_premask='c'
+        #TODO
         elif key == ord('i'):
             self.addNewSample(compute_avg=True)
 

@@ -29,11 +29,14 @@ class ImagePreprocessor:
         self.input_topic = rospy.get_param(
             '/image_preproc/noisy_camera_topic',camera_dict['nsyHazCam'])
 
+        self.depth_topic="/zed2/depth/depth_registered"
         self.preproc_topic=rospy.get_param(
             '/image_preproc/preproc_camera_topic',camera_dict['prprocHazCam'])
+        self.depth_preproc_topic="/zed2/depth/depth_preproc"
         print('listened topic: ' + self.input_topic)
         print('published topic: ' + self.preproc_topic)
 
+        self.depth_img=np.ndarray
         self.noisy_img = np.ndarray
         self.in_dtype = None
         self.camera_resolution = tuple
@@ -50,6 +53,8 @@ class ImagePreprocessor:
         # ROS I/O
         self.noisyListener = rospy.Subscriber(self.input_topic, Image, self.preprocessCallback)
         self.preprocPublisher = rospy.Publisher(self.preproc_topic, Image, queue_size=1)
+        self.depth_sub = rospy.Subscriber(self.depth_topic, Image, self.depthCallback)
+        self.depthPreproc_pub = rospy.Publisher(self.depth_preproc_topic, Image, queue_size=1)
 
 
     def initPreprocessor(self):
@@ -74,12 +79,24 @@ class ImagePreprocessor:
 
             # NOISY IMAGE OUTPUT
             out_msg=self.cvbridge.cv2_to_imgmsg(self.preproc_img)
+            out_depth=self.cvbridge.cv2_to_imgmsg(self.depth_img)
             self.preprocPublisher.publish(out_msg)
+            self.depthPreproc_pub.publish(out_depth)
             # self.updateStatistics(this_time)
         except CvBridgeError:
             # TODO: self.bridgerror
             print("cv bridge error")
 
+
+
+    def depthCallback(self,depth_msg):
+        """
+        acquires depth camera data to be preprocessed for the ImageFilter class
+        """
+        try:
+            self.depth_img = self.cvbridge.imgmsg_to_cv2(depth_msg,depth_msg.encoding)
+        except CvBridgeError:
+            print("DEPTH: cv bridge error")
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
     # IMAGE PREPROCESS
@@ -97,6 +114,9 @@ class ImagePreprocessor:
             self.noisy_img = cv2.pyrDown(self.noisy_img, dstsize=new_size)
         else:
             self.noisy_img=cv2.resize(self.noisy_img,new_size,interpolation=cv2.INTER_AREA)
+        try:
+            self.depth_img=cv2.resize(self.depth_img,new_size,interpolation=cv2.INTER_AREA)
+        except Exception: pass
         self.current_resolution=new_size[1],new_size[0]
         if self.print_once_resolution:
             self.print_once_resolution=False
