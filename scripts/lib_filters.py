@@ -3,7 +3,7 @@
 import cv2
 import numpy as np
 
-def linear_stretching(image, max_v=None, min_v=None, histogram=None):
+def linearStretching(image, max_v=None, min_v=None, histogram=None):
     """
     original: dark, peak at low intensity (GL)
     stretched:
@@ -17,17 +17,17 @@ def linear_stretching(image, max_v=None, min_v=None, histogram=None):
         max_v = np.max(image)
     # Stretching with dynamic max and min based on percentiles.
     elif 'p' in str(max_v) and histogram is not None:
-        max_v = find_percentile_value(histogram, int(max_v[1:]))
+        max_v = findPercentileValue(histogram, int(max_v[1:]))
     if min_v is None:
         min_v = np.min(image)
     elif 'p' in str(min_v) and histogram is not None:
-        min_v = find_percentile_value(histogram, int(min_v[1:]))
+        min_v = findPercentileValue(histogram, int(min_v[1:]))
     # else: use constant values, passed as input
     image[image < min_v] = min_v
     image[image > max_v] = max_v
     return 255. / (max_v - min_v) * (image - min_v)
 
-def find_percentile_value(histogram, percentile):
+def findPercentileValue(histogram, percentile):
     s = 0
     idx = 0
     total_pixel = np.sum(histogram)
@@ -36,7 +36,7 @@ def find_percentile_value(histogram, percentile):
         idx += 1
     return idx
 
-def exponential_operator(image, r=0.45):
+def exponentialOperator(image, r=0.45):
     """
     Pout= 255 *(Pin /255)**r
     r<1 improves dark areas, reduces bright ones

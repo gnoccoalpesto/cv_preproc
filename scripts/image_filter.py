@@ -177,7 +177,7 @@ class ImagePreprocNode:
         self.sample_source='/sim_ws/src/almax/cv_preproc/media/samples/'
         self.addedAllSample=False
 
-        self.SHOW_RESULT=True
+        self.SHOW_RESULT=False
         self.selected_premask='c'
         # available premasks:   c   color
         #                       d   depth
@@ -242,16 +242,17 @@ class ImagePreprocNode:
         self.depth_mask=np.zeros_like(image)
         self.MENU_IMAGE=np.zeros_like(image)
         MENU_TEXT="Esc: exit (RESPAWNS: Ctrl+C in terminal)\ns: displays sample filter\nr: displays range filter\n"
-        MENU_TEXT=MENU_TEXT+"z: enables all samples in ../media/samples folder for sample filter\nx: disables all samples\n"
-        MENU_TEXT=MENU_TEXT+"l: add new sample(s) to filter from ROI(s) selection;\n      multiple allowed, esc to exit\n"
-        MENU_TEXT=MENU_TEXT+"k: same as 'k' & new samples are saved in ./media/samples folder\nm: increase morphological operations amount\n"
+        MENU_TEXT=MENU_TEXT+"z: enables all samples for sample filter\nx: disables all samples\n"
+        MENU_TEXT=MENU_TEXT+"l: add new sample(s) to filter from ROI(s) selection;\n      multiple allowed, Esc to stop\n"
+        MENU_TEXT=MENU_TEXT+"k: same as 'l' & new samples are saved\nm: increase morphological operations amount\n"
         MENU_TEXT=MENU_TEXT+"n: decrease morphological operations amount\nd: select depth based (sky) prefilter\n"
         MENU_TEXT = MENU_TEXT +"c: select color based (sky) prefilter\n"
-        y0, dy = 10, cv2.getTextSize(MENU_TEXT,cv2.FONT_HERSHEY_SIMPLEX,1,2)[0][1]
+        MENU_TEXT=MENU_TEXT+"\nSAMPLE FOLDER: ../media/samples/"
+        y0, dy = 18, cv2.getTextSize(MENU_TEXT,cv2.FONT_HERSHEY_SIMPLEX,1,2)[0][1]
         # text splitting and multi line printing
         for ii, line in enumerate(MENU_TEXT.split('\n')):
             y = y0 + ii * int(1.2*dy)
-            cv2.putText(self.MENU_IMAGE,line,(10,y),cv2.FONT_HERSHEY_SIMPLEX,0.5,(255,255,255))
+            cv2.putText(self.MENU_IMAGE,line,(20,y),cv2.FONT_HERSHEY_SIMPLEX,0.6,(255,255,255))
         print("INPUT\t==\t==\t==\n resolution: {}\n channels: {}\n depth type: {}".
               format(str(self.current_resolution),str(self.camera_channels),str(self.in_dtype)))
 
@@ -290,14 +291,14 @@ class ImagePreprocNode:
 
 
     #--UNUSED--
-    # def imuCallback(self,raw_imu):
+    # def imuCallback(self,imu_msg):
     # TODO: refine sky recognition using cross imu data:
     #  roll angle sets inclination of division line (horizon tilting)
     #  pitch angle sets distance from the upper corner:
     #   >0 toward x center (width wise direction) (horizon up)
     #   <0 toward y center (height wise direction) == far from x center (horizon down)
     # https://wiki.ros.org/imu_filter_madgwick
-    #     self.imu_msg=raw_imu
+    #     self.imu_msg=imu_msg
 
 
     def depthCallback(self,depth_msg):
@@ -317,6 +318,7 @@ class ImagePreprocNode:
         except CvBridgeError:
             # TODO: self.bridgerror
             print("DEPTH: cv bridge error")
+        except : pass
 
 
     def inputCallback(self,img_msg):
@@ -352,19 +354,18 @@ class ImagePreprocNode:
 
     # MAIN LOOP : every time a msg on self.input_topic received
     def filterCallback(self, _):
-        self.updateStatistics(self.this_time)
+        # self.updateStatistics(self.this_time)
 
         # IMAGE ANALYSIS --------------------------------------------------------------------
         # self.cameraAnalysis(show_hist=True)
         # self.splitCamera(self.sky_to_groud,hud=False)
         # self.cameraClustering()
 
-
         # BACKGROUND FILTERING -------------------------------------------------------------------------
         morph_ops = self.MORPH_OPS# if self.toggle_morph else ''
 
         if not self.SHOW_RESULT:
-            cv2.imshow("menu",self.MENU_IMAGE)
+            cv2.imshow("keystrokes menu",self.MENU_IMAGE)
 
         self.preMask(sky_mask_method=self.selected_premask)
         if self.toggle_sample:
@@ -373,7 +374,6 @@ class ImagePreprocNode:
         elif self.toggle_range:
             self.rangeFilter(show_result=self.SHOW_RESULT, morph_ops=morph_ops)
             self.filtered_img=self.res_range.copy()
-
 
         # OUTPUT ------------------------------------------------------------------------------------
         #TODO: superimpose time matermark on output to understand when output stopped

@@ -1,6 +1,6 @@
 <?xml version="1.0"?>
 <launch>
-	<arg name="gui_rviz" default="false" doc="opens rviz"/>
+	<arg name="gui_rviz" default="true" doc="opens rviz"/>
 	<arg name="debug" default="true" doc="toggles off nodes in development"/>
 	<arg name="gara" default="false" doc="if true, does not use simulation, noise creation,..."/>
 	<arg name="manual_control" default="true" doc="manual rover control w/ joystick"/>
@@ -11,6 +11,7 @@
 <group unless="$(arg gara)">
 <!--	gazebo: STARTS AUTONOMOUSLY-->
 
+	<!-- niose simulation -->
 	<node
 		pkg="cv_preproc"
 		type="noise_simulation.py"
@@ -32,6 +33,7 @@
 	</include>
 
 <!--	IMAGE PROCESSING-->
+	<!-- noise remotion and subsampling -->
 	<node
 		pkg="cv_preproc"
 		type="preprocessor.py"
@@ -39,6 +41,7 @@
 		output="screen"
 		respawn="true"
 	/>
+	<!-- ground filter -->
 	<node
 		pkg="cv_preproc"
 		type="image_filter.py"
@@ -47,6 +50,7 @@
 		respawn="true"
 	  	respawn_delay="3"
 	/>
+	<!-- blob identification -->
 	<node unless="$(arg debug)"
 		pkg="cv_preproc"
 		type="object_detector.py"
