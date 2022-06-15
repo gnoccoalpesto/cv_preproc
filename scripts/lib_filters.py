@@ -5,6 +5,8 @@ import numpy as np
 
 def linearStretching(image, max_v=None, min_v=None, histogram=None):
     """
+    TODO: remember that this requires histogram normalized over total pixel count (not "range" normalized),
+        menaning that the hist is the pfm of the pixels' intensities
     original: dark, peak at low intensity (GL)
     stretched:
     w/ image's min max vals: low effect, almost same hsit
@@ -69,6 +71,7 @@ def equalization(image, histogram):
 def meanFilter(image, k_size=5):
     # really high smoothing
     mean_kernel = np.ones([k_size, k_size]) / (k_size ** 2)
+    #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
     return cv2.filter2D(image, -1, mean_kernel)
 
 def denoisingFilter(image):
@@ -77,6 +80,7 @@ def denoisingFilter(image):
         [1, 2, 1],
         [2, 4, 2],
         [1, 2, 1]]) / 16
+    #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
     return cv2.filter2D(image, -1, denoising_kernel)
 
 def highPassFilter(image):
@@ -85,6 +89,7 @@ def highPassFilter(image):
         [0, 1, 0],
         [1, -4, 1],
         [0, 1, 0]])
+    #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
     return cv2.filter2D(image, -1, hp_kernel)
 
 def gaussianFilter(image, sigma=1.5, k_size=None, dim_mode=''):
@@ -95,9 +100,12 @@ def gaussianFilter(image, sigma=1.5, k_size=None, dim_mode=''):
         return cv2.GaussianBlur(image, (k_size, k_size), sigma)
     g_kernel_1D = cv2.getGaussianKernel(k_size, sigma)
     if dim_mode == '1d' or dim_mode == '1D':
+        #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
         transpose_img = cv2.filter2D(image, -1, g_kernel_1D)
         return cv2.filter2D(transpose_img, -1, g_kernel_1D.transpose())
+    #if dir_mode=='2D'
     g_kernel_2D = g_kernel_1D.dot(g_kernel_1D.transpose())
+    #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
     return cv2.filter2D(image, -1, g_kernel_2D)
 
 def medianFilter(image, k_size=5):
@@ -120,10 +128,11 @@ def sobelFilter(image):
         [0, 0, 0],
         [1, 2, 1]]) * 1 / 4
     # Finding dI(x, y)/dx
+    #TODO: filter does not automatically flip kernel (for convolution); but not needed for symmetrical ker
     dx = cv2.filter2D(image.astype(float), -1, sobel_kernel_x)
     dx = np.abs(dx)
     # Finding dI(x, y)/dy
     dy = cv2.filter2D(image.astype(float), -1, sobel_kernel_y)
     dy = np.abs(dy)
     # Finding gradient module pixel-wise
-    return np.maximum(dx, dy)
+    return np.maximum(dx,dy)

@@ -65,20 +65,14 @@ from cv_bridge import CvBridge, CvBridgeError
 
 import cv2
 import numpy as np
-from scipy.cluster.vq import kmeans2
-# histograms analysis tools and filters definitions
-from lib_histograms import computeHistogram, drawHistogram
-from lib_filters import bilateralFilter,sobelFilter,highPassFilter,\
-    linearStretching,findPercentileValue,equalization,pfm
-# TODO: fix import
-# TODO? ALSO import class methods?
+# filters definitions
+from lib_filters import bilateralFilter,sobelFilter,highPassFilter,gaussianFilter
 import time
-from glob import glob
 
 
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-class ObjectDetectorNode:
+class ObjectDetector:
     """    """
 
     def __init__(self):
@@ -104,15 +98,16 @@ class ObjectDetectorNode:
         # depth data already subsampled of same amount of image
         self.depth_topic = '/zed2/depth/depth_preproc'
 
+        self.objects_topic='/cv_preproc/objects'
+
         # obtains a ~10ms cycle len, considering a bit of superimposed overhead
         DETECTOR_BASE_FREQ = 1000
         detector_freq = rospy.get_param('image_preproc/detector_freq', DETECTOR_BASE_FREQ)
         detector_cycle_time_nsec = rospy.Duration(nsecs=int(1E9 / detector_freq))
 
-        self.MORPH_OPS = '1'  # =='c'
-        # self.toggle_morph = True
+        self.toggle_prerefinement=True
 
-        self.toggle_enclosing=False
+        self.toggle_enclosing=True
         self.toggle_canny = True
         self.toggle_hipass = False
         self.objects = [] # UNUSED
@@ -125,11 +120,6 @@ class ObjectDetectorNode:
         self.iter_counter = 0
         self.ave_time = 0
 
-        #   KCLUSTERS     #   #   #   #   #   #
-        self.n_colors = 12
-        self.cl_criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 10, 1.0)
-        self.cl_flags = cv2.KMEANS_RANDOM_CENTERS
-
         #   #   #   #   #   #   #   #   #
         self.initDetector()
         self.iter_count=0
@@ -141,6 +131,7 @@ class ObjectDetectorNode:
         # self.morphOpsListener = rospy.Subscriber(self.morph_ops_source, String, self.morphOpsCallback)
         self.depthListener = rospy.Subscriber(self.depth_topic, Image, self.depthCallback)
         self.original_sub = rospy.Subscriber(self.original_topic, Image, self.originalCallback)
+        self.objects_pub=rospy.Publisher(self.objects_topic,Image,queue_size=1)
         time.sleep(.25)
         self.this_time = time.time()
         # overhead can be controlled by setting a different cycle frequency
@@ -213,18 +204,18 @@ class ObjectDetectorNode:
     # MAIN LOOP : every time a msg on self.input_topic received
     def detectorCallback(self, _):
         # self.updateStatistics(self.this_time)
-        grey_image=self.filtered_grey.copy()
-
         # PREPROCESSING --------------------------------------------------------------
-        # self.cameraClustering()
+        grey_image=self.filtered_grey.copy()
 
         # BLOBS ----------------------------------------------------------------------
         if self.toggle_canny:
             window_name="canny's"
             blob_img=np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image>0]=255
-            blob_img=self.objectRefinement(blob_img,'c')
-
+            if self.toggle_prerefinement:
+                blob_img=self.objectRefinement(blob_img,'o',k_size=3)
+                blob_img=self.objectRefinement(blob_img,'c',k_size=5)
+            cv2.imshow('blobs',blob_img)
 
         # EDGES -------------------------------------------------------------------------
         # no real difference with changing params
@@ -244,8 +235,9 @@ class ObjectDetectorNode:
             self.edges=hipass_edges
 
         # CLEANING -------------------------------------------------------------------------
-        self.edges=self.objectRefinement(self.edges,self.MORPH_OPS,k_size=3)
-        # cv2.imshow(window_name+" edges",self.edges)
+        # no real use, best if done before of edges detection
+        #TODO: could be smoothing->thresholding to remove "too smoothed" valuer (near "noise") be usefull to
+        #   reject the smallest blobs/edges and noise?
         
         # CLOSED CONTOURS -------------------------------------------------------------------------
         self.contours = cv2.findContours(self.edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)[0]
@@ -257,6 +249,7 @@ class ObjectDetectorNode:
         ##opening/closing for removing noise: better to be done after contours found
         # contours selection
         ##improve:dilate before comparison and pick the inner areas
+        #TODO: draw contours on black image, then morph ops, then find edges and contours
 
         # CONTOURS SELECTION
         ## alsoM = cv2.moments(c)
@@ -265,11 +258,11 @@ class ObjectDetectorNode:
         #TODO: area filtering
         # self.contours=self.testArea(self.contours,'maxa',area_coeff=.1)
 
-        # rectangular contours
-        self.contours=sorted(self.contours,key=lambda x: cv2.contourArea(x))
+        self.contours=sorted(self.contours,key=lambda ctr: cv2.contourArea(ctr),reverse=True)
+        big_contours=self.contours[:20]
         rectangular_contours=self.testShape(self.contours,4)
-        rectangular_contours=sorted(rectangular_contours,key=lambda x: cv2.contourArea(x),reverse=True)
-        big_contours=rectangular_contours[:10]
+        rectangular_contours=sorted(rectangular_contours,key=lambda ctr: cv2.contourArea(ctr),reverse=True)
+        big_rectangular_contours=rectangular_contours[:10]
 
 
         # OBJECTS -------------------------------------------------------------------------
@@ -279,18 +272,26 @@ class ObjectDetectorNode:
         RGB_YELLOW=(255,255,0)
         RGB_VIOLET=(100,36,210)
         RGB_GREEN=(0,255,0)
-        cnt_img=np.zeros_like(self.filtered_img)
+        # cnt_img=np.zeros_like(self.filtered_img)
         cnt_img=self.original_image
         cv2.drawContours(cnt_img, self.contours, -1, RGB_VIOLET, 1)
-        cv2.drawContours(cnt_img,rectangular_contours, -1, RGB_YELLOW, -1)
-        for contour in big_contours:
-            x, y, w, h = cv2.boundingRect(contour)
-            cv2.rectangle(cnt_img, (x, y), (x + w, y + h), RGB_GREEN, 2)
+        cv2.drawContours(cnt_img,rectangular_contours, -1, RGB_YELLOW, 1)
+        if self.toggle_enclosing:
+            for contour in big_rectangular_contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                cv2.rectangle(cnt_img, (x, y), (x + w, y + h), RGB_GREEN, 2)
+            for contour in big_contours:
+                x, y, w, h = cv2.boundingRect(contour)
+                cv2.rectangle(cnt_img, (x, y), (x + w, y + h), RGB_CYAN, 2)
         cnt_img=cv2.cvtColor(cnt_img,cv2.COLOR_RGB2BGR)
         cv2.imshow('contours',cnt_img)
 
+        obj_msg=self.cvbridge.cv2_to_imgmsg(cnt_img)
+        self.objects_pub.publish(obj_msg)
 
-        k = cv2.waitKey(1) & 0xFF
+        # TODO: cv2.pollKey() better because saves few msecs?
+        # k = cv2.waitKey(1) & 0xFF
+        k = cv2.pollKey() & 0xFF
         if k == 27:  # Esc
             rospy.signal_shutdown('Esc key pressed')
         elif k != 255:  # NO KEY PRESSED
@@ -433,41 +434,6 @@ class ObjectDetectorNode:
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
     #   IMAGE PREPROCESSING
-    def cameraClustering(self, cl_method='sy', show_result=False):
-        """
-        clustering routine using k-means
-        :param cl_method: used method for clustering
-        :param show_result: shows result in a window
-        Tested:
-            'cv2' or 'cv' or 'c'
-            'scipy' or 'sy' or 'y'      (compatible speed, ~80ms overhead)
-            'sklearn' or 'sk' or 'k'    (awkwardly slow)
-
-        TODO initialize this offline to find dominant colors of image
-
-        TODO: mask black pixels to avoid considering them in clustering
-        """
-        image = self.preproc_img
-        current_resolution = self.current_resolution
-        image = image.reshape((-1, 3)).astype('float32')
-        if 'c' in cl_method:
-            _, labels, centers = cv2.kmeans(image, self.n_colors, None, self.cl_criteria, 10, self.cl_flags)
-        elif 'y' in cl_method:
-            centers, labels = kmeans2(image, self.n_colors, 10, 1, 'points', 'warn', False)
-        centers = np.uint8(centers)
-        clustered = centers[labels.flatten()]
-        h, w = current_resolution
-        clustered = clustered.reshape((h, w, self.camera_channels))
-        # TODO: dominant colors
-        # _, counts = np.unique(labels, return_counts=True)
-        # dominant = centers[np.argmax(counts)]
-        # label_counts = np.arange(0, len(np.unique(cluster.labels_)) + 1)
-        # histogram, _ = np.histogram(cluster.labels_, bins=label_counts)
-        # histogrdekam = histogram.astype('float32')
-        # histogram /= histogram.sum()
-        if show_result:
-            cv2.imshow('clustered', cv2.cvtColor(clustered, cv2.COLOR_RGB2BGR))
-
 
     #       #       #       #       #       #       #       #
     # REFINEMENT     #       #       #
@@ -493,21 +459,6 @@ class ObjectDetectorNode:
 
         TODO: refine number of iterations based on image, samples,...
         """
-        if morph_ops == '' or '0' in morph_ops:
-            pass
-        elif '1' in morph_ops:
-            morph_ops = 'c'
-        elif '2' in morph_ops:
-            morph_ops = 'ce'
-        elif '3' in morph_ops:
-            morph_ops = 'ceo'
-        elif '4' in morph_ops:
-            morph_ops = 'ceh'
-        elif '5' in morph_ops:
-            morph_ops = 'ceoh'
-        elif '6' in morph_ops:
-            morph_ops = 'ceho'
-
         kernel = cv2.getStructuringElement(k_shape, (k_size, k_size))
         for mop in morph_ops:
             if mop == 'd' or mop == 'dilate':
@@ -547,21 +498,9 @@ class ObjectDetectorNode:
             self.toggle_hipass = False
             self.resetStatistics()
         elif key == ord('p'):
-            try:
-                morph_amount = int(self.MORPH_OPS)
-                if morph_amount < 6:
-                    self.MORPH_OPS = str(morph_amount + 1)
-            except ValueError:  # catches int(NON_NUMERIC_STR)
-                self.MORPH_OPS = '0'
-        elif key == ord('o'):
-            try:
-                morph_amount = int(self.MORPH_OPS)
-                if morph_amount > 0:
-                    self.MORPH_OPS = str(morph_amount - 1)
-            except ValueError:
-                self.MORPH_OPS = '0'
+            self.toggle_prerefinement=not self.toggle_prerefinement
         elif key == ord('e'):
-            self.toggle_enclosing=not(self.toggle_enclosing)
+            self.toggle_enclosing=not self.toggle_enclosing
 
 
     #   #   #   #   #   #   #   #   #   #   #   #
@@ -592,7 +531,7 @@ if __name__ == '__main__':
     print("\nNavCam Object Detector for Navigation Pipeline")
     print('node name: ' + node_name)
 
-    preprocessor = ObjectDetectorNode()
+    preprocessor = ObjectDetector()
     try:
         rospy.spin()
     except KeyboardInterrupt:

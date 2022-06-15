@@ -111,7 +111,7 @@ from glob import glob
 
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
 #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
-class ImagePreprocNode:
+class GroundFilter:
     """    """
     def __init__(self):
         #TODO: use the other camera;
@@ -387,7 +387,9 @@ class ImagePreprocNode:
         self.filteredPublisher.publish(out_msg)
 
         ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##  ##
-        k = cv2.waitKey(1) & 0xFF
+        # TODO: cv2.pollKey() better because saves few msecs?
+        # k = cv2.waitKey(1) & 0xFF
+        k = cv2.pollKey() & 0xFF
         if k == 27:#Esc
             rospy.signal_shutdown('Esc key pressed')
         elif k!=255:#NO KEY PRESSED
@@ -852,6 +854,7 @@ class ImagePreprocNode:
 
                 #TODO: improve refinement
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                #TODO: filter does not automatically flip the kernel (for convolution), yet it is symmetrical
                 cv2.filter2D(add_mask, -1, kernel, add_mask)
                 # add_mask = self.maskRefinement(add_mask, morph_ops=morph_ops)
                 cv2.normalize(add_mask, add_mask, 0, 255, cv2.NORM_MINMAX)
@@ -1258,7 +1261,7 @@ if __name__ == '__main__':
     print("\nNavCam Image Prepocessing Node for Navigation Pipeline")
     print('node name: ' + node_name)
 
-    preprocessor = ImagePreprocNode()
+    preprocessor = GroundFilter()
     try:
         rospy.spin()
     except KeyboardInterrupt:
