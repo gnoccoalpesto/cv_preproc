@@ -108,7 +108,8 @@ class ObjectDetector:
         self.toggle_prerefinement=True
 
         self.toggle_enclosing=True
-        self.toggle_canny = True
+        self.toggle_inner = True
+        self.toggle_canny = False
         self.toggle_hipass = False
         self.objects = [] # UNUSED
         self.edges = np.ndarray
@@ -225,8 +226,24 @@ class ObjectDetector:
             use_L2_gradient=True
             self.edges = cv2.Canny(blob_img, canny_thr_high, canny_thr_low,
                                    apertureSize=k_size_sobel,L2gradient=use_L2_gradient)
+        elif self.toggle_inner:
 
-        if self.toggle_hipass:
+            window_name = "inner"
+            blob_img = np.zeros_like(self.filtered_grey.copy())
+            blob_img[grey_image > 0] = 255
+            if self.toggle_prerefinement:
+                blob_img=medianFilter(blob_img,3)
+                blob_img=self.objectRefinement(blob_img,'o',k_size=3)
+                blob_img=self.objectRefinement(blob_img,'c',k_size=5)
+                # self.PRE="ENABLED"
+                # cv2.imshow('blobs', blob_img)
+            # else: self.PRE="DISABLED"
+
+            # self.DETECTOR="INNER, MORPH BASED"
+            STRUCTURING_ELEMENT=cv2.getStructuringElement(cv2.MORPH_RECT,ksize=(3,3))
+            self.edges = (cv2.dilate(blob_img,STRUCTURING_ELEMENT))-blob_img
+
+        elif self.toggle_hipass:
             window_name="high pass filter"
             # reliabily spots the inner square of the marker
             # BUT lots of internal edges at low intensity
@@ -491,11 +508,19 @@ class ObjectDetector:
             cv2.destroyAllWindows()
             self.toggle_canny = False
             self.toggle_hipass = True
+            self.toggle_inner=False
             self.resetStatistics()
         elif key == ord('y'):
             cv2.destroyAllWindows()
             self.toggle_canny = True
             self.toggle_hipass = False
+            self.toggle_inner=False
+            self.resetStatistics()
+        elif key == ord('i'):
+            cv2.destroyAllWindows()
+            self.toggle_canny = False
+            self.toggle_hipass = False
+            self.toggle_inner=True
             self.resetStatistics()
         elif key == ord('p'):
             self.toggle_prerefinement=not self.toggle_prerefinement

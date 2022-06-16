@@ -28,7 +28,7 @@ robot's navigation, or are interesting in some way due to diversity from raw ter
 """
 import cv2
 import numpy as np
-from lib_filters import bilateralFilter, denoisingFilter,highPassFilter
+from lib_filters import bilateralFilter, denoisingFilter,highPassFilter, medianFilter
 from lib_histograms import computeHistogram
 from glob import glob
 import time
@@ -614,6 +614,7 @@ class ObjectDetector:
             blob_img = np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image > 0] = 255
             if self.toggle_prerefinement:
+                blob_img=medianFilter(blob_img,3)
                 blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 blob_img=self.objectRefinement(blob_img,'c',k_size=5)
                 self.PRE="ENABLED"
@@ -622,7 +623,6 @@ class ObjectDetector:
 
             # EDGES -------------------------------------------------------------------------
             # no perceived difference with changing params
-
             self.DETECTOR="BLOB BASED CANNY'S"
             canny_thr_high = 100
             canny_thr_low = 20
@@ -636,6 +636,7 @@ class ObjectDetector:
             blob_img = np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image > 0] = 255
             if self.toggle_prerefinement:
+                blob_img=medianFilter(blob_img,3)
                 blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 blob_img=self.objectRefinement(blob_img,'c',k_size=5)
                 self.PRE="ENABLED"
@@ -655,7 +656,8 @@ class ObjectDetector:
             self.edges = hipass_edges
 
         # CLEANING -------------------------------------------------------------------------
-        # best if done before edges detection, upon blobs
+        # best if done before edges
+        # self.edges=medianFilter(self.edges,5)
 
         # CLOSED CONTOURS -------------------------------------------------------------------------
         self.contours = cv2.findContours(self.edges, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)[0]
