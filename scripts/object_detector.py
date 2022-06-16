@@ -214,8 +214,10 @@ class ObjectDetector:
             blob_img=np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image>0]=255
             if self.toggle_prerefinement:
-                blob_img=self.objectRefinement(blob_img,'o',k_size=3)
-                blob_img=self.objectRefinement(blob_img,'c',k_size=5)
+                blob_img=medianFilter(blob_img,3)
+                # almost no effect compared to median filter
+                # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
+                # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
             cv2.imshow('blobs',blob_img)
 
         # EDGES -------------------------------------------------------------------------
@@ -233,8 +235,9 @@ class ObjectDetector:
             blob_img[grey_image > 0] = 255
             if self.toggle_prerefinement:
                 blob_img=medianFilter(blob_img,3)
-                blob_img=self.objectRefinement(blob_img,'o',k_size=3)
-                blob_img=self.objectRefinement(blob_img,'c',k_size=5)
+                # almost no effect compared to median filter
+                # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
+                # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
                 # self.PRE="ENABLED"
                 # cv2.imshow('blobs', blob_img)
             # else: self.PRE="DISABLED"
