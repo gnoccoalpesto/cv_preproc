@@ -84,14 +84,15 @@ class ImageNoiseSimulator:
         image=self.sim_img.copy()
         noisy_img = np.zeros_like(image, dtype=np.uint8)
         if 'uniform' in noise_type or 'u' in noise_type:
-            Min = np.zeros([1, self.camera_channels])
             intensity=intensity_coeff*2.5
+            # Min = np.zeros([1, self.camera_channels])
+            Min = -intensity*np.ones([1, self.camera_channels])
             Max=intensity*np.ones([1,self.camera_channels])
             cv2.randu(noisy_img, Min, Max)
             image = cv2.add(image, noisy_img)
         if 'gaussian' in noise_type or 'g' in noise_type:
             intensity=intensity_coeff*2.5
-            mean=intensity*np.ones([1,self.camera_channels])
+            mean=np.zeros([1,self.camera_channels])
             stddev=intensity*np.ones([1,self.camera_channels])
             cv2.randn(noisy_img, mean, stddev)
             image = cv2.add(image, noisy_img)
