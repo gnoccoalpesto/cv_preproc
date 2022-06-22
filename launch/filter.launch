@@ -42,7 +42,7 @@
 		respawn="true"
 	/>
 	<!-- ground filter -->
-	<node unless="$(arg debug)"
+	<node
 		pkg="cv_preproc"
 		type="image_filter.py"
 		name="image_filter"

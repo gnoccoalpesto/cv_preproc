@@ -609,29 +609,7 @@ class ObjectDetector:
         grey_image = self.filtered_grey = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
 
         # BLOBS ----------------------------------------------------------------------
-        if self.toggle_canny:
-            window_name = "canny's"
-            blob_img = np.zeros_like(self.filtered_grey.copy())
-            blob_img[grey_image > 0] = 255
-            if self.toggle_prerefinement:
-                blob_img=medianFilter(blob_img,3)
-                # almost no effect compared to median filter
-                # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
-                # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
-                self.PRE="ENABLED"
-                # cv2.imshow('blobs', blob_img)
-            else: self.PRE="DISABLED"
-
-            # EDGES -------------------------------------------------------------------------
-            # no perceived difference with changing params
-            self.DETECTOR="BLOB BASED CANNY'S"
-            canny_thr_high = 100
-            canny_thr_low = 20
-            k_size_sobel = 5
-            use_L2_gradient = True
-            self.edges = cv2.Canny(blob_img, canny_thr_high, canny_thr_low,
-                                       apertureSize=k_size_sobel, L2gradient=use_L2_gradient)
-        elif self.toggle_inner:
+        if self.toggle_inner:
 
             window_name = "inner"
             blob_img = np.zeros_like(self.filtered_grey.copy())
@@ -646,8 +624,29 @@ class ObjectDetector:
             else: self.PRE="DISABLED"
 
             self.DETECTOR="INNER, MORPH BASED"
+
+        # EDGES -------------------------------------------------------------------------
             STRUCTURING_ELEMENT=cv2.getStructuringElement(cv2.MORPH_RECT,ksize=(3,3))
             self.edges = (cv2.dilate(blob_img,STRUCTURING_ELEMENT))-blob_img
+
+        elif self.toggle_canny:
+            window_name = "canny's"
+            if self.toggle_prerefinement:
+                grey_image=medianFilter(grey_image,3)
+                # almost no effect compared to median filter
+                # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
+                # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
+                self.PRE="ENABLED"
+            else: self.PRE="DISABLED"
+
+            # no perceived difference with changing params
+            self.DETECTOR="BLOB BASED CANNY'S"
+            canny_thr_high = 100
+            canny_thr_low = 20
+            k_size_sobel = 5
+            use_L2_gradient = True
+            self.edges = cv2.Canny(grey_image, canny_thr_high, canny_thr_low,
+                                       apertureSize=k_size_sobel, L2gradient=use_L2_gradient)
 
         elif self.toggle_hipass:
             self.DETECTOR = "GREY IMG. HIGHPASS FILTER"
