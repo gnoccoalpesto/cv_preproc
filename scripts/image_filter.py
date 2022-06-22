@@ -354,7 +354,7 @@ class GroundFilter:
 
     # MAIN LOOP : every time a msg on self.input_topic received
     def filterCallback(self, _):
-        # self.updateStatistics(self.this_time)
+        self.updateStatistics(self.this_time)
 
         # IMAGE ANALYSIS --------------------------------------------------------------------
         # self.cameraAnalysis(show_hist=True)
@@ -698,20 +698,23 @@ class GroundFilter:
             apply contextually an "ignore black pxs mask" to ignore already masked regions
             (and also visual markers)
         """
-        image = self.preproc_img
+        image = self.preproc_img.copy()
+        # hsv_image=np.zeros_like(image)
+        # image[np.where(~self.sky_mask)]=0
+        # cv2.findNonZero()
         hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
         if do_shift:
             red_max = (30, 255, 255)
             red_min = (0, 35, 50)
-            red_mask = cv2.inRange(hsv_image, red_min, red_max)
+            red_mask = cv2.inRange(hsv_image[np.where(~self.sky_mask)], red_min, red_max)
             winname_prefix=winname_prefix+' shifted'
         else:
             red_max = (15, 255, 255)
             red_zeromax = (0, 30, 30)  # S=70
             red_zeromin = (180, 255, 255)
             red_min = (165, 30, 50)
-            red_mask_min = cv2.inRange(hsv_image, red_zeromax, red_max)
-            red_mask_max = cv2.inRange(hsv_image, red_min, red_zeromin)
+            red_mask_min = cv2.inRange(hsv_image[np.where(~self.sky_mask)], red_zeromax, red_max)
+            red_mask_max = cv2.inRange(hsv_image[np.where(~self.sky_mask)], red_min, red_zeromin)
             red_mask = cv2.bitwise_or(red_mask_min, red_mask_max)
             winname_prefix=winname_prefix+' '
         range_mask = cv2.bitwise_or(red_mask, self.sky_mask)

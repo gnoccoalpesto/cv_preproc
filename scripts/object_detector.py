@@ -66,7 +66,7 @@ from cv_bridge import CvBridge, CvBridgeError
 import cv2
 import numpy as np
 # filters definitions
-from lib_filters import bilateralFilter,sobelFilter,highPassFilter,gaussianFilter
+from lib_filters import bilateralFilter,sobelFilter,highPassFilter,gaussianFilter, medianFilter
 import time
 
 
