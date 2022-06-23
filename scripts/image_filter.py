@@ -584,8 +584,8 @@ class GroundFilter:
         _, otsu_mask=cv2.threshold(h_image,0,255,cv2.THRESH_OTSU+cv2.THRESH_BINARY_INV)
         otsu_mask=cv2.bitwise_or(otsu_mask,self.sky_mask)
         otsu_mask = cv2.bitwise_not(otsu_mask)
-        otsu_mask = self.maskRefinement(otsu_mask,morph_ops=morph_ops)
-        res_otsu=cv2.bitwise_and(image,image,mask=otsu_mask)
+        ref_otsu_mask = self.maskRefinement(otsu_mask,morph_ops=morph_ops)
+        res_otsu=cv2.bitwise_and(image,image,mask=ref_otsu_mask)
         if show_result:
             cv2.imshow(winname_prefix+' OTSU FILTER RESULT',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
 
@@ -633,8 +633,8 @@ class GroundFilter:
         _, bal_mask=cv2.threshold(h_image,bal_tresh,255,cv2.THRESH_BINARY_INV)
         bal_mask = cv2.bitwise_or(bal_mask, self.sky_mask)
         bal_mask = cv2.bitwise_not(bal_mask)
-        bal_mask = self.maskRefinement(bal_mask,morph_ops=morph_ops)
-        res_bal=cv2.bitwise_and(image,image,mask=bal_mask)
+        ref_bal_mask = self.maskRefinement(bal_mask,morph_ops=morph_ops)
+        res_bal=cv2.bitwise_and(image,image,mask=ref_bal_mask)
 
         if show_result:
             cv2.imshow(winname_prefix+' BALANCED FILTER RESULT',cv2.cvtColor(res_bal,cv2.COLOR_RGB2BGR))
@@ -753,13 +753,12 @@ class GroundFilter:
         image = self.preproc_img
         threshold=3
 
-        distance_mask=self.myDistance(dist_method=dist_method)
-        _,distance_mask=cv2.threshold(distance_mask, threshold, 255,cv2.THRESH_BINARY_INV)
-
+        pre_distance_mask=self.myDistance(dist_method=dist_method)
+        _,distance_mask=cv2.threshold(pre_distance_mask, threshold, 255,cv2.THRESH_BINARY_INV)
         distance_mask = cv2.bitwise_or(distance_mask.astype('uint8'), self.sky_mask)
         distance_mask = cv2.bitwise_not(distance_mask)
-        distance_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
-        res_distance = cv2.bitwise_and(image, image, mask=distance_mask)
+        ref_distance_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
+        res_distance = cv2.bitwise_and(image, image, mask=ref_distance_mask)
         if show_result:
             cv2.imshow(winname_prefix+' DISTANCE FILTER RESULT',cv2.cvtColor(res_distance,cv2.COLOR_RGB2BGR))
 
@@ -858,7 +857,7 @@ class GroundFilter:
                 #TODO: improve refinement
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                 #TODO: filter does not automatically flip the kernel (for convolution), yet it is symmetrical
-                cv2.filter2D(add_mask, -1, kernel, add_mask)
+                cv2.filter2D(add_mask, -1, kernel, add_mask.copy())
                 # add_mask = self.maskRefinement(add_mask, morph_ops=morph_ops)
                 cv2.normalize(add_mask, add_mask, 0, 255, cv2.NORM_MINMAX)
                 _, add_mask = cv2.threshold(add_mask, 50, 255, 0)

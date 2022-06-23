@@ -113,7 +113,8 @@ class ImagePreprocessor:
         """
         new_size=self.camera_resolution[1]//downsize_coeff,self.camera_resolution[0]//downsize_coeff
         if do_blur and downsize_coeff!=1:
-            self.noisy_img = cv2.pyrDown(self.noisy_img, dstsize=new_size)
+            image=self.noisy_img.copy()
+            self.noisy_img = cv2.pyrDown(image, dstsize=new_size)
         else:
             self.noisy_img=cv2.resize(self.noisy_img,new_size,interpolation=cv2.INTER_AREA)
         try:

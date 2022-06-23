@@ -214,7 +214,7 @@ class ObjectDetector:
             blob_img = np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image > 0] = 255
             if self.toggle_prerefinement:
-                blob_img = medianFilter(blob_img, 3)
+                blob_img = medianFilter(blob_img.copy(), 3)
                 # almost no effect compared to median filter
                 # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
@@ -224,13 +224,13 @@ class ObjectDetector:
             # self.DETECTOR="INNER, MORPH BASED"
         # EDGES -------------------------------------------------------------------------
             STRUCTURING_ELEMENT = cv2.getStructuringElement(cv2.MORPH_RECT, ksize=(3, 3))
-            self.edges = (cv2.dilate(blob_img, STRUCTURING_ELEMENT)) - blob_img
+            self.edges = (cv2.dilate(blob_img.copy(), STRUCTURING_ELEMENT)) - blob_img
 
 
         elif self.toggle_canny:
             window_name="canny's"
             if self.toggle_prerefinement:
-                grey_image=medianFilter(grey_image,3)
+                grey_image=medianFilter(grey_image.copy(),3)
                 # almost no effect compared to median filter
                 # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 # blob_img=self.objectRefinement(blob_img,'c',k_size=5)

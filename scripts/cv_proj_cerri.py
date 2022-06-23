@@ -166,7 +166,8 @@ class ImagePreprocessor:
         downsample_coeff=self.DOWNSAMPLE_COEFF
         new_size=self.camera_resolution[1]//downsample_coeff,self.camera_resolution[0]//downsample_coeff
         if do_blur and not downsample_coeff==1:
-            self.noisy_img = cv2.pyrDown(self.noisy_img, dstsize=new_size)
+            image=self.noisy_img.copy()
+            self.noisy_img = cv2.pyrDown(image, dstsize=new_size)
         else:
             self.noisy_img=cv2.resize(self.noisy_img,new_size,interpolation=cv2.INTER_AREA)
 
@@ -380,7 +381,7 @@ class GroundFilter:
             for sample_hist in self.samples:
                 add_mask=cv2.calcBackProject([hsv_image],[0,1],sample_hist,[0,180,0,256],1)
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                cv2.filter2D(add_mask, -1, kernel, add_mask)
+                cv2.filter2D(add_mask, -1, kernel, add_mask.copy())
                 cv2.normalize(add_mask, add_mask, 0, 255, cv2.NORM_MINMAX)
                 _, add_mask = cv2.threshold(add_mask, 50, 255, 0)
                 sample_mask=cv2.bitwise_or(sample_mask,add_mask)
@@ -616,7 +617,7 @@ class ObjectDetector:
             blob_img = np.zeros_like(self.filtered_grey.copy())
             blob_img[grey_image > 0] = 255
             if self.toggle_prerefinement:
-                blob_img = medianFilter(blob_img, 3)
+                blob_img = medianFilter(blob_img.copy(), 3)
                 # almost no effect compared to median filter
                 # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
@@ -628,12 +629,12 @@ class ObjectDetector:
 
         # EDGES -------------------------------------------------------------------------
             STRUCTURING_ELEMENT=cv2.getStructuringElement(cv2.MORPH_RECT,ksize=(3,3))
-            self.edges = (cv2.dilate(blob_img,STRUCTURING_ELEMENT))-blob_img
+            self.edges = (cv2.dilate(blob_img.copy(),STRUCTURING_ELEMENT))-blob_img
 
         elif self.toggle_canny:
             window_name = "canny's"
             if self.toggle_prerefinement:
-                grey_image=medianFilter(grey_image,3)
+                grey_image=medianFilter(grey_image.copy(),3)
                 # almost no effect compared to median filter
                 # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
