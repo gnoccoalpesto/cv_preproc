@@ -220,13 +220,11 @@ class ObjectDetector:
                 # blob_img=self.objectRefinement(blob_img,'o',k_size=3)
                 # blob_img=self.objectRefinement(blob_img,'c',k_size=5)
                 # self.PRE="ENABLED"
-                # cv2.imshow('blobs', blob_img)
             # else: self.PRE="DISABLED"
             # self.DETECTOR="INNER, MORPH BASED"
         # EDGES -------------------------------------------------------------------------
             STRUCTURING_ELEMENT = cv2.getStructuringElement(cv2.MORPH_RECT, ksize=(3, 3))
             self.edges = (cv2.dilate(blob_img.copy(), STRUCTURING_ELEMENT)) - blob_img
-
 
         elif self.toggle_canny:
             window_name="canny's"
