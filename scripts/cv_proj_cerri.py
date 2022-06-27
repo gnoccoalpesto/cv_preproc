@@ -169,7 +169,8 @@ class ImagePreprocessor:
             image=self.noisy_img.copy()
             self.noisy_img = cv2.pyrDown(image, dstsize=new_size)
         else:
-            self.noisy_img=cv2.resize(self.noisy_img,new_size,interpolation=cv2.INTER_AREA)
+            image=self.noisy_img.copy()
+            self.noisy_img=cv2.resize(image,new_size,interpolation=cv2.INTER_AREA)
 
 
     def noiseRemotion(self, do_denoise=True):
@@ -381,7 +382,7 @@ class GroundFilter:
             for sample_hist in self.samples:
                 add_mask=cv2.calcBackProject([hsv_image],[0,1],sample_hist,[0,180,0,256],1)
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
-                cv2.filter2D(add_mask, -1, kernel, add_mask.copy())
+                cv2.filter2D(add_mask.copy(), -1, kernel, add_mask)
                 cv2.normalize(add_mask, add_mask, 0, 255, cv2.NORM_MINMAX)
                 _, add_mask = cv2.threshold(add_mask, 50, 255, 0)
                 sample_mask=cv2.bitwise_or(sample_mask,add_mask)

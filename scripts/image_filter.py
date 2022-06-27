@@ -857,7 +857,7 @@ class GroundFilter:
                 #TODO: improve refinement
                 kernel=cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
                 #TODO: filter does not automatically flip the kernel (for convolution), yet it is symmetrical
-                cv2.filter2D(add_mask, -1, kernel, add_mask.copy())
+                cv2.filter2D(add_mask.copy(), -1, kernel, add_mask)
                 # add_mask = self.maskRefinement(add_mask, morph_ops=morph_ops)
                 cv2.normalize(add_mask, add_mask, 0, 255, cv2.NORM_MINMAX)
                 _, add_mask = cv2.threshold(add_mask, 50, 255, 0)
@@ -958,6 +958,7 @@ class GroundFilter:
         test of correlation w/ while image not activated (prevents remotion of PARTICULARS)
 
         :param save_sample: toggles sample save to a file in sample directory
+        :param compute_avg: computes the average color instead of adding the sample
         :param compute_avg: computes the average color instead of adding the sample
 
         TODO: since selection occours over a single frame of video, it's prone to noise:
