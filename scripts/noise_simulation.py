@@ -33,7 +33,7 @@ class ImageNoiseSimulator:
             rospy.get_param('/image_preproc/noisy_camera_topic',self.noisy_topic)
 
         self.noise_type=rospy.get_param('/image_preproc/noise_type','ug')
-        self.noise_intensity=rospy.get_param('/image_preproc/noise_intensity',1)
+        self.noise_intensity=rospy.get_param('/image_preproc/noise_intensity',4)
 
         print('listened topic: ' + self.camera_topic)
         print('published topic: ' + self.noisy_topic)
@@ -78,7 +78,9 @@ class ImageNoiseSimulator:
                 noise_type=self.noise_type, intensity_coeff=self.noise_intensity)
 
             # NOISY IMAGE OUTPUT
-            out_msg=self.cvbridge.cv2_to_imgmsg(self.sim_img)
+            # cv2.imshow('noisy image',self.noisy_img)
+            self.noisy_img=cv2.cvtColor(self.noisy_img.copy(),cv2.COLOR_RGB2BGR)
+            out_msg=self.cvbridge.cv2_to_imgmsg(self.noisy_img)
             self.noisyPublisher.publish(out_msg)
             # self.updateStatistics(this_time)
         except CvBridgeError:

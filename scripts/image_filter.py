@@ -130,6 +130,7 @@ class GroundFilter:
         print('published topic: ' + self.filtered_topic)
 
         self.preproc_img = np.ndarray
+        self.noisy_img = np.ndarray
         self.in_dtype = None
         self.camera_channels=int
         self.current_resolution= tuple
@@ -221,6 +222,7 @@ class GroundFilter:
         # self.imuListener=rospy.Subscriber(self.imu_topic,Imu,self.imuCallback)
         self.depthListener=rospy.Subscriber(self.depth_topic,Image,self.depthCallback)
         time.sleep(.25)
+        self.noisyListener = rospy.Subscriber('/camera/image_raw/noisy', Image, self.noisyCallback)
         self.this_time=time.time()
         # overhead can be controlled by setting a different cycle frequency
         self.filterTimer=rospy.Timer(filter_cycle_time_nsec,self.filterCallback)
@@ -332,6 +334,16 @@ class GroundFilter:
             print("INPUT: cv bridge error")
 
 
+    def noisyCallback(self, img_msg):
+        """
+        'Real Time' (threaded) ascquisition of noisy input image
+        """
+        try:
+            self.noisy_img = self.cvbridge.imgmsg_to_cv2(img_msg, desired_encoding='passthrough')
+        except CvBridgeError:
+            print("noisy: cv bridge error")
+
+
     def inputTimerCallback(self,_):
         """
         same as above, but using specific rospy.Timer insterad of incoming message to
@@ -355,6 +367,8 @@ class GroundFilter:
     # MAIN LOOP : every time a msg on self.input_topic received
     def filterCallback(self, _):
         self.updateStatistics(self.this_time)
+        # self.showHistograms('h')
+        # self.showHistograms('h',noisy='n')
 
         # IMAGE ANALYSIS --------------------------------------------------------------------
         # self.cameraAnalysis(show_hist=True)
@@ -382,7 +396,8 @@ class GroundFilter:
         # self.showChannels(channels='f')
         # self.showChannels(channels='hsv',h_shift=30)
 
-        out_img=cv2.cvtColor(self.filtered_img,cv2.COLOR_RGB2BGR)
+        out_img=self.filtered_img
+        # out_img=cv2.cvtColor(self.filtered_img,cv2.COLOR_RGB2BGR)
         out_msg = self.cvbridge.cv2_to_imgmsg(out_img)
         self.filteredPublisher.publish(out_msg)
 
@@ -553,7 +568,8 @@ class GroundFilter:
         #     draw_rectangles_where_wheel_is()
         if 'c'in sky_mask_method or sky_mask_method=='color':
             image = self.preproc_img
-            hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+            # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+            hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
             #sky filtering
             blue_min=(105, 0, 0)
             blue_max=(135, 255, 255)
@@ -578,7 +594,8 @@ class GroundFilter:
         image = self.preproc_img
         # manage h circularity
         h_shift=27
-        hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
+        # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+        hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
         h_image=hsv_image[...,0]
         h_image=(h_image+h_shift)%180
         _, otsu_mask=cv2.threshold(h_image,0,255,cv2.THRESH_OTSU+cv2.THRESH_BINARY_INV)
@@ -587,7 +604,8 @@ class GroundFilter:
         ref_otsu_mask = self.maskRefinement(otsu_mask,morph_ops=morph_ops)
         res_otsu=cv2.bitwise_and(image,image,mask=ref_otsu_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' OTSU FILTER RESULT',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' OTSU FILTER RESULT',res_otsu)
+            # cv2.imshow(winname_prefix+' OTSU FILTER RESULT',cv2.cvtColor(res_otsu,cv2.COLOR_RGB2BGR))
 
 
     # -- UNUSED --
@@ -598,7 +616,8 @@ class GroundFilter:
         """
         image = self.preproc_img
         h_shift = 27
-        hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+        # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+        hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
         h_image = hsv_image[..., 0]
         h_image = (h_image + h_shift) % 180
         ada_mask = cv2.adaptiveThreshold(h_image,255,cv2.ADAPTIVE_THRESH_MEAN_C,
@@ -607,7 +626,8 @@ class GroundFilter:
         ada_mask = cv2.bitwise_not(ada_mask)
         res_ada = cv2.bitwise_and(image, image, mask=ada_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' ADAPTIVE FILTER RESULT', cv2.cvtColor(res_ada, cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' ADAPTIVE FILTER RESULT', res_ada)
+            # cv2.imshow(winname_prefix+' ADAPTIVE FILTER RESULT', cv2.cvtColor(res_ada, cv2.COLOR_RGB2BGR))
 
 
     def balancedFilter(self,show_result=False,winname_prefix='',morph_ops=' '):
@@ -625,7 +645,8 @@ class GroundFilter:
         """
         image = self.preproc_img
         h_shift=27
-        hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
+        # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+        hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
         h_image=hsv_image[...,0]
         h_image=(h_image+h_shift)%180
         h_hist=np.histogram(h_image,180,[0,180])
@@ -637,7 +658,8 @@ class GroundFilter:
         res_bal=cv2.bitwise_and(image,image,mask=ref_bal_mask)
 
         if show_result:
-            cv2.imshow(winname_prefix+' BALANCED FILTER RESULT',cv2.cvtColor(res_bal,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' BALANCED FILTER RESULT',res_bal)
+            # cv2.imshow(winname_prefix+' BALANCED FILTER RESULT',cv2.cvtColor(res_bal,cv2.COLOR_RGB2BGR))
 
     @staticmethod
     def balanced_hist_thresholding(hist):
@@ -702,7 +724,8 @@ class GroundFilter:
         # hsv_image=np.zeros_like(image)
         # image[np.where(~self.sky_mask)]=0
         # cv2.findNonZero()
-        hsv_image = cv2.cvtColor(image, cv2.COLOR_RGB2HSV)
+        # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+        hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
         if do_shift:
             red_max = (30, 255, 255)
             red_min = (0, 35, 50)
@@ -722,7 +745,8 @@ class GroundFilter:
         self.range_mask = self.maskRefinement(range_mask,morph_ops=morph_ops)
         self.res_range = cv2.bitwise_and(image, image, mask=self.range_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' RANGE FILTER RESULT',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' RANGE FILTER RESULT',self.res_range)
+            # cv2.imshow(winname_prefix+' RANGE FILTER RESULT',cv2.cvtColor(self.res_range,cv2.COLOR_RGB2BGR))
 
 
     def distanceFilter(self,dist_method='mahalanobis',show_result=False,winname_prefix='',morph_ops=' '):
@@ -760,7 +784,8 @@ class GroundFilter:
         ref_distance_mask = self.maskRefinement(distance_mask,morph_ops=morph_ops)
         res_distance = cv2.bitwise_and(image, image, mask=ref_distance_mask)
         if show_result:
-            cv2.imshow(winname_prefix+' DISTANCE FILTER RESULT',cv2.cvtColor(res_distance,cv2.COLOR_RGB2BGR))
+            cv2.imshow(winname_prefix+' DISTANCE FILTER RESULT',res_distance)
+            # cv2.imshow(winname_prefix+' DISTANCE FILTER RESULT',cv2.cvtColor(res_distance,cv2.COLOR_RGB2BGR))
 
 
     def myDistance(self, dist_method='mahalanobis',mean_pix=None):
@@ -847,7 +872,8 @@ class GroundFilter:
             self.pause_stats=True
             self.addNewSample()
         if self.samples:#==if not self.samples==[]
-            hsv_image=cv2.cvtColor(image.copy(),cv2.COLOR_RGB2HSV)
+            # hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+            hsv_image = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
             _,_,image_hist=computeHistogram(hsv_image,'hs',range_normalize=True)
             sample_mask=np.zeros(np.asarray(self.current_resolution),dtype=np.uint8)
 
@@ -874,7 +900,8 @@ class GroundFilter:
 
         if show_result:
             cv2.imshow(winname_prefix + ' SAMPLE FILTER RESULT, {} samples'.format(len(self.samples)),
-                       cv2.cvtColor(self.res_sample, cv2.COLOR_RGB2BGR))
+                       self.res_sample)
+                       # cv2.cvtColor(self.res_sample, cv2.COLOR_RGB2BGR))
 
 
     #       #       #       #       #       #       #       #
@@ -992,12 +1019,14 @@ class GroundFilter:
         winname="MOUSE+ENTER for selection,ESC to exit"
         img=self.preproc_img
         if not compute_avg:
-            rois=cv2.selectROIs(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
+            rois=cv2.selectROIs(winname,img)
+            # rois=cv2.selectROIs(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
             cv2.destroyWindow(winname)
             for (roi_x0,roi_y0,roi_x,roi_y) in rois:
                 try:
                     new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
-                    new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
+                    new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_BGR2HSV)
+                    # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
                     _,_,sample_hist=computeHistogram(new_sample,'hs',range_normalize=True)
                     sample_hist=sample_hist.astype('float32')
 
@@ -1022,17 +1051,20 @@ class GroundFilter:
                 if save_sample:
                     filename=self.sample_source+'sample_{}.jpg'.format(str(time.time()))
                     try:
-                        cv2.imwrite(filename,cv2.cvtColor(new_sampl,cv2.COLOR_RGB2BGR))
+                        cv2.imwrite(filename,new_sampl)
+                        # cv2.imwrite(filename,cv2.cvtColor(new_sampl,cv2.COLOR_RGB2BGR))
                         print('saved: {}'.format(filename))
                     except Exception as exc:
                         print('sample saving unsuccessfull '+str(exc)[13])
             print("number of current samples: {}".format(len(self.samples)))
         else:
-            roi=cv2.selectROI(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
+            roi=cv2.selectROI(winname,cv2.cvtColor(img,cv2.COLOR_BGR2BGR))
+            # roi=cv2.selectROI(winname,cv2.cvtColor(img,cv2.COLOR_RGB2BGR))
             cv2.destroyWindow(winname)
             roi_x0,roi_y0,roi_x,roi_y= roi
             new_sampl=img[roi_y0:roi_y+roi_y0,roi_x0:roi_x+roi_x0]
-            new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
+            new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_BGR2HSV)
+            # new_sample=cv2.cvtColor(new_sampl,cv2.COLOR_RGB2HSV)
             arr = np.reshape(new_sample, (new_sample.shape[0] * new_sample.shape[1], 3))
             print('HSV avg: {}'+format(np.mean(arr,axis=0)))
 
@@ -1083,7 +1115,8 @@ class GroundFilter:
         if 'b' in channels:
             cv2.imshow(winname_prefix + "B", image[:, :, 2])
         if 'h' in channels or 's' in channels or 'v' in channels:
-            hsv_in = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
+            hsv_in = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2HSV)
+            # hsv_in = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2HSV)
             if 'h' in channels:
                 out = (hsv_in[:, :, 0] + h_shift) % 180
                 cv2.imshow(winname_prefix + "H", out)
@@ -1092,7 +1125,8 @@ class GroundFilter:
             if 'v' in channels:
                 cv2.imshow(winname_prefix + "V", hsv_in[:, :, 2])
         if 'GL' in channels:
-            gl_out = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2GRAY)
+            gl_out = cv2.cvtColor(image.copy(), cv2.COLOR_BGR2GRAY)
+            # gl_out = cv2.cvtColor(image.copy(), cv2.COLOR_RGB2GRAY)
             cv2.imshow(winname_prefix + "GL", gl_out)
 
 
@@ -1112,10 +1146,12 @@ class GroundFilter:
         rgb_shift=92
         if noisy == 'p' or noisy == 'preprocessed':
             rgb_in_image = self.preproc_img
+            rgb_in_image=cv2.cvtColor(rgb_in_image,cv2.COLOR_BGR2RGB)
             winname_prefix = winname_prefix + ' PREPROCESSSED '
-        # elif noisy == 'n' or noisy == 'noisy':
-        #     winname_prefix = winname_prefix + ' NOISY '
-        #     rgb_in_image = self.noisy_img
+        elif noisy == 'n' or noisy == 'noisy':
+            winname_prefix = winname_prefix + ' NOISY '
+            rgb_in_image = self.noisy_img
+            rgb_in_image=cv2.cvtColor(rgb_in_image,cv2.COLOR_BGR2RGB)
         # else:
         #     rgb_in_image = self.sim_img
         shift_text=", SHIFT AMOUNT= " + str(int(rgb_shift*2.56)) + " /256"
@@ -1140,6 +1176,7 @@ class GroundFilter:
 
         if 'h' in channels or 's' in channels or 'v' in channels:
             shift_text = ", SHIFT AMOUNT= " + str(int(hsv_shift * 1.8)) + " /180"
+            # hsv_in_image = cv2.cvtColor(rgb_in_image.copy(), cv2.COLOR_BGR2HSV)
             hsv_in_image = cv2.cvtColor(rgb_in_image.copy(), cv2.COLOR_RGB2HSV)
             if 'h' in channels:
                 _, _, h_hist = computeHistogram(hsv_in_image, 'h', range_normalize=True)
@@ -1157,6 +1194,7 @@ class GroundFilter:
                 v_hist_img=v_hist_img[v_hist_img.shape[0]//2:,:]
                 cv2.imshow(winname_prefix+"V"+" NOT SHIFTED",v_hist_img)
         if 'GL' in channels:
+            # gl_out = cv2.cvtColor(rgb_in_image, cv2.COLOR_BGR2GRAY)
             gl_out = cv2.cvtColor(rgb_in_image, cv2.COLOR_RGB2GRAY)
             cv2.imshow(winname_prefix + "GL", gl_out)
 

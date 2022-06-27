@@ -42,7 +42,7 @@ class ImageNoiseSimulator:
 
         self.noise_type='ug'
         self.NOISE="gaussian, uniform"
-        self.noise_intensity=1
+        self.noise_intensity=4
 
         self.sim_img = np.ndarray
         self.in_dtype = None
@@ -828,7 +828,6 @@ if __name__ == '__main__':
             cv2.imshow('CURRENT STATs',stats_image)
             new_disp_size=stats_image.shape[0]//RESIZE_COEFF,stats_image.shape[1]//RESIZE_COEFF
             new_disp_size=int(new_disp_size[0]),int(new_disp_size[1])
-            print(new_disp_size)
             cv2.resizeWindow('CURRENT STATs',new_disp_size[1],new_disp_size[0])
 
             k = cv2.pollKey() & 0xff

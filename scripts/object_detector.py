@@ -184,7 +184,8 @@ class ObjectDetector:
         try:
             image = self.cvbridge.imgmsg_to_cv2(img_msg, desired_encoding='passthrough')
             self.filtered_img=image
-            self.filtered_grey=cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            self.filtered_grey=cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+            # self.filtered_grey=cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
         except CvBridgeError:
             print("INPUT: cv bridge error")
 
@@ -290,7 +291,8 @@ class ObjectDetector:
         RGB_VIOLET=(100,36,210)
         RGB_GREEN=(0,255,0)
         # cnt_img=np.zeros_like(self.filtered_img)
-        cnt_img=self.original_image
+        cnt_img=cv2.cvtColor(self.original_image,cv2.COLOR_BGR2RGB)
+        # cnt_img=self.original_image
         cv2.drawContours(cnt_img, self.contours, -1, RGB_VIOLET, 1)
         cv2.drawContours(cnt_img,rectangular_contours, -1, RGB_YELLOW, 1)
         if self.toggle_enclosing:
