@@ -785,13 +785,16 @@ if __name__ == '__main__':
         ret, frame=cap.read()
         frame_resolution=frame.shape[:2]
         downsample_ratio=2
-        RESIZE_COEFF=1.0
+        RESIZE_COEFF=1.8
         downsampled_resolution=frame_resolution[0]//downsample_ratio,frame_resolution[1]//downsample_ratio
         cv2.namedWindow('filtered image',cv2.WINDOW_NORMAL)
         cv2.namedWindow('contours',cv2.WINDOW_NORMAL)
         cv2.namedWindow('CURRENT STATs',cv2.WINDOW_NORMAL)
-        cv2.moveWindow('contours',downsampled_resolution[1]+100,200)
-        cv2.moveWindow('CURRENT STATs',downsampled_resolution[1]//2+100,downsampled_resolution[0]+350)
+        cv2.moveWindow('contours',600,0)
+        cv2.moveWindow('filtered image',0,0)
+        cv2.moveWindow('CURRENT STATs',0,400)
+        #cv2.moveWindow('contours',int(downsampled_resolution[1]//RESIZE_COEFF),200)
+        #cv2.moveWindow('CURRENT STATs',int(downsampled_resolution[1]//RESIZE_COEFF*2),int(downsampled_resolution[0]//RESIZE_COEFF)+350)
         simulator = ImageNoiseSimulator(frame)
         preprocessor=ImagePreprocessor(frame,downsample_ratio)
         ground_filter=GroundFilter(frame,downsampled_resolution)
@@ -820,16 +823,16 @@ if __name__ == '__main__':
                         "OBJ.DETECTION METHOD(i/y/h): {}\n\nENCLOSING RECTANGLES(e): {}\n\nOBJECT PREFILTERING(p): {}"\
                         "\n\nEsc to exit must be shortly hold, aswell as e and i/h/y"\
                 .format(ground_filter.FILTER,ground_filter.MORPH_OPS,detector.DETECTOR,detector.RECTANGLES,detector.PRE)
-            y0, dy = 30, cv2.getTextSize(STATS_TEXT, cv2.FONT_HERSHEY_SIMPLEX, 1, 2)[0][1]
+            y0, dy = 30, cv2.getTextSize(STATS_TEXT, cv2.FONT_HERSHEY_SIMPLEX, 1, 4)[0][1]
             # text splitting and multi line printing
             for ii, line in enumerate(STATS_TEXT.split('\n')):
                 y = y0 + ii * int(2 * dy)
                 cv2.putText(stats_image, line, (20, y), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255))
             cv2.imshow('CURRENT STATs',stats_image)
             new_disp_size=stats_image.shape[0]//RESIZE_COEFF,stats_image.shape[1]//RESIZE_COEFF
-            new_disp_size=int(new_disp_size[0]),int(new_disp_size[1])
+            new_disp_size=int(new_disp_size[0]*1.2),int(new_disp_size[1]*1.2)
             cv2.resizeWindow('CURRENT STATs',new_disp_size[1],new_disp_size[0])
-
+            
             k = cv2.pollKey() & 0xff
             # k = cv2.waitKey(1) & 0xff
             if k == 27: print('exiting');cv2.destroyAllWindows();break
