@@ -354,7 +354,7 @@ class GroundFilter:
         filter camera stream by histogram backprojection of selected samples
          builds a probability map of a certain pixel of the target img to be part of
          the sample; a treshold defines the binary mask
-
+CV_WINDOW_AUTOSIZE
         :param show_result: displays image of result
         :param morph_ops: ordered string of morphological operations to perform
         :param winname_prefix: prefix for window name (when showing result)
@@ -582,6 +582,7 @@ class ObjectDetector:
         self.toggle_inner=True
         self.edges = np.ndarray
         self.contours = []
+        self.cnt_img=np.ndarray
 
         # text for stats window
         self.DETECTOR=""
@@ -689,6 +690,7 @@ class ObjectDetector:
                 x, yy, w, h = cv2.boundingRect(contour)
                 cv2.rectangle(cnt_img, (x, yy), (x + w, yy + h), RGB_CYAN, 2)
         cnt_img = cv2.cvtColor(cnt_img, cv2.COLOR_RGB2BGR)
+        self.cnt_img=cnt_img
         cv2.imshow('contours', cnt_img)
 
     #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #   #
@@ -783,10 +785,11 @@ if __name__ == '__main__':
         ret, frame=cap.read()
         frame_resolution=frame.shape[:2]
         downsample_ratio=2
+        RESIZE_COEFF=1.0
         downsampled_resolution=frame_resolution[0]//downsample_ratio,frame_resolution[1]//downsample_ratio
-        cv2.namedWindow('filtered image')
-        cv2.namedWindow('contours')
-        cv2.namedWindow('CURRENT STATs')
+        cv2.namedWindow('filtered image',cv2.WINDOW_NORMAL)
+        cv2.namedWindow('contours',cv2.WINDOW_NORMAL)
+        cv2.namedWindow('CURRENT STATs',cv2.WINDOW_NORMAL)
         cv2.moveWindow('contours',downsampled_resolution[1]+100,200)
         cv2.moveWindow('CURRENT STATs',downsampled_resolution[1]//2+100,downsampled_resolution[0]+350)
         simulator = ImageNoiseSimulator(frame)
@@ -803,8 +806,14 @@ if __name__ == '__main__':
             preprocessor.preprocessLoop(noisy)
             # (back)ground remotion
             ground_filter.filterLoop(preprocessor.preproc_img)
+            new_disp_size=ground_filter.filtered_img.shape[0]//RESIZE_COEFF,ground_filter.filtered_img.shape[1]//RESIZE_COEFF
+            new_disp_size=int(new_disp_size[0]),int(new_disp_size[1])
+            cv2.resizeWindow('filtered image',new_disp_size[1],new_disp_size[0])
             # objects identification
             detector.detectorLoop(ground_filter.filtered_img,preprocessor.preproc_img)
+            new_disp_size=detector.cnt_img.shape[0]//RESIZE_COEFF,detector.cnt_img.shape[1]//RESIZE_COEFF
+            new_disp_size=int(new_disp_size[0]),int(new_disp_size[1])
+            cv2.resizeWindow('contours',new_disp_size[1],new_disp_size[0])
             # stats window
             stats_image=np.zeros_like(preprocessor.preproc_img)
             STATS_TEXT ="SELECTED FILTER(s/r): {}\n\nBACKGROUND REMOTION MORPH. OPs LEVEL(n/m): {}/6\n\n" \
@@ -817,10 +826,16 @@ if __name__ == '__main__':
                 y = y0 + ii * int(2 * dy)
                 cv2.putText(stats_image, line, (20, y), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255))
             cv2.imshow('CURRENT STATs',stats_image)
+            new_disp_size=stats_image.shape[0]//RESIZE_COEFF,stats_image.shape[1]//RESIZE_COEFF
+            new_disp_size=int(new_disp_size[0]),int(new_disp_size[1])
+            print(new_disp_size)
+            cv2.resizeWindow('CURRENT STATs',new_disp_size[1],new_disp_size[0])
 
             k = cv2.pollKey() & 0xff
             # k = cv2.waitKey(1) & 0xff
             if k == 27: print('exiting');cv2.destroyAllWindows();break
+            elif k==45:RESIZE_COEFF+=.2
+            elif k==43 and RESIZE_COEFF>1: RESIZE_COEFF-=.2
             elif k != 255:
                 ground_filter.keyAction(k)
                 detector.keyAction(k)
